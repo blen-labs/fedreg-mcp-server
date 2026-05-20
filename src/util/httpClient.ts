@@ -57,7 +57,7 @@ export class HttpClient {
           method,
           headers: {
             'accept': accept,
-            'user-agent': this.opts.userAgent ?? 'fedreg-mcp-server/0.1',
+            'user-agent': this.opts.userAgent ?? 'fedreg-mcp-server/1.0 (+https://github.com/blencorp/fedreg-mcp-server)',
             ...(o.body ? { 'content-type': 'application/json' } : {}),
             ...(o.headers ?? {}),
           },

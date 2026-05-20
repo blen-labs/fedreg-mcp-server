@@ -55,7 +55,7 @@ async function main(): Promise<void> {
   const deps = await buildSupervisor({
     frBaseUrl: process.env.FEDREG_FR_BASE_URL ?? 'https://www.federalregister.gov/api/v1',
     ecfrBaseUrl: process.env.FEDREG_ECFR_BASE_URL ?? 'https://www.ecfr.gov/api',
-    userAgent: process.env.FEDREG_USER_AGENT ?? 'fedreg-mcp-server/0.1 (+https://modelcontextprotocol.io)',
+    userAgent: process.env.FEDREG_USER_AGENT ?? 'fedreg-mcp-server/1.0 (+https://github.com/blencorp/fedreg-mcp-server)',
     upstreamTimeoutMs: Number(process.env.FEDREG_UPSTREAM_TIMEOUT_MS ?? 20_000),
     upstreamRetries: Number(process.env.FEDREG_UPSTREAM_RETRIES ?? 3),
     cacheTtlMs: Number(process.env.FEDREG_CACHE_TTL_MS ?? 300_000),
