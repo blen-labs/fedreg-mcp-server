@@ -1,0 +1,93 @@
+{
+  "name": "@blen/fedreg-mcp-server",
+  "version": "1.0.0",
+  "description": "Code-mode MCP server for the U.S. Federal Register and Electronic Code of Federal Regulations APIs.",
+  "license": "Apache-2.0",
+  "author": "BLEN, Inc. (https://blencorp.com)",
+  "homepage": "https://github.com/blencorp/fedreg-mcp-server#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blencorp/fedreg-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/blencorp/fedreg-mcp-server/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "federal-register",
+    "ecfr",
+    "code-mode",
+    "sandbox",
+    "isolated-vm",
+    "ai-agents",
+    "claude",
+    "anthropic",
+    "regulations",
+    "government-data"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "fedreg-mcp-server": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "schema",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=20.10"
+  },
+  "packageManager": "pnpm@11.1.2",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/bin.js || true",
+    "dev": "tsx src/bin.ts",
+    "start": "node dist/bin.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "prepack": "pnpm run build",
+    "mcpb:prepare": "node scripts/mcpb-prepare.mjs",
+    "mcpb:pack": "mcpb pack"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "acorn": "^8.12.1",
+    "acorn-walk": "^8.3.4",
+    "jose": "^5.9.6",
+    "lru-cache": "^11.0.2",
+    "undici": "^6.21.0",
+    "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "isolated-vm": "^5.0.1"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.17.0",
+    "nock": "^14.0.0-beta.19",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
