@@ -1,0 +1,338 @@
+{
+  "endpoints": [
+    {
+      "id": "fr.documents.search",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.documents.search(params)",
+      "description": "Search Federal Register documents published since 1994. Filter by agency, publication date, type (RULE, PRORULE, NOTICE, PRESDOCU), topic, CFR title/part, docket id, significance.",
+      "example": "await fr.documents.search({ conditions: { term: 'methane', agencies: ['environmental-protection-agency'], publication_date: { gte: '2024-01-01' } }, per_page: 50, order: 'newest' })"
+    },
+    {
+      "id": "fr.documents.get",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.documents.get(documentNumber, fields?)",
+      "description": "Fetch a single Federal Register document by its FR document number.",
+      "example": "await fr.documents.get('2024-12345')"
+    },
+    {
+      "id": "fr.documents.getMany",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.documents.getMany(documentNumbers, fields?)",
+      "description": "Fetch multiple Federal Register documents in one call.",
+      "example": "await fr.documents.getMany(['2024-12345', '2024-12346'])"
+    },
+    {
+      "id": "fr.documents.facets",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.documents.facets({ facet, conditions? })",
+      "description": "Aggregate document counts by daily/weekly/monthly/quarterly/yearly buckets, or by agency, topic, section, subject, type.",
+      "example": "await fr.documents.facets({ facet: 'monthly', conditions: { agencies: ['nuclear-regulatory-commission'] } })"
+    },
+    {
+      "id": "fr.publicInspection.current",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.publicInspection.current(fields?)",
+      "description": "List documents currently on public inspection (not yet officially published).",
+      "example": "await fr.publicInspection.current()"
+    },
+    {
+      "id": "fr.publicInspection.search",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.publicInspection.search(params)",
+      "description": "Search public inspection documents by agency, type, special filing, docket.",
+      "example": "await fr.publicInspection.search({ conditions: { agencies: ['federal-aviation-administration'] } })"
+    },
+    {
+      "id": "fr.publicInspection.get",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.publicInspection.get(documentNumber, fields?)",
+      "description": "Fetch one public inspection document by document number.",
+      "example": "await fr.publicInspection.get('2024-99999')"
+    },
+    {
+      "id": "fr.agencies.list",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.agencies.list()",
+      "description": "List every agency that publishes in the Federal Register with slug, short name, parent.",
+      "example": "await fr.agencies.list()"
+    },
+    {
+      "id": "fr.agencies.get",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.agencies.get(slug)",
+      "description": "Fetch a single agency by slug (e.g. 'environmental-protection-agency').",
+      "example": "await fr.agencies.get('environmental-protection-agency')"
+    },
+    {
+      "id": "fr.issues.get",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.issues.get(publicationDate)",
+      "description": "Fetch the table of contents for a specific Federal Register issue.",
+      "example": "await fr.issues.get('2024-03-15')"
+    },
+    {
+      "id": "fr.suggestedSearches.list",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.suggestedSearches.list(sections?)",
+      "description": "List curated FederalRegister.gov searches by section.",
+      "example": "await fr.suggestedSearches.list('environment')"
+    },
+    {
+      "id": "fr.suggestedSearches.get",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.suggestedSearches.get(section)",
+      "description": "Get curated searches for one section.",
+      "example": "await fr.suggestedSearches.get('environment')"
+    },
+    {
+      "id": "fr.images.get",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.images.get(identifier)",
+      "description": "Fetch metadata for a Federal Register image (graphics, signatures).",
+      "example": "await fr.images.get('ER15MR24.001')"
+    },
+
+    {
+      "id": "ecfr.admin.agencies",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.admin.agencies()",
+      "description": "Get the full agency hierarchy in the eCFR (parent/child relationships, slugs, CFR references).",
+      "example": "await ecfr.admin.agencies()"
+    },
+    {
+      "id": "ecfr.titles.list",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.titles.list()",
+      "description": "List all 50 CFR titles with their latest amendment dates and reserved status.",
+      "example": "await ecfr.titles.list()"
+    },
+    {
+      "id": "ecfr.structure",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.structure(date, title)",
+      "description": "Return the hierarchical structure (subtitle/chapter/subchapter/part/subpart/section/appendix) of a CFR title on a given date.",
+      "example": "await ecfr.structure('2024-01-01', 40)"
+    },
+    {
+      "id": "ecfr.ancestry",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.ancestry(date, title, query?)",
+      "description": "Resolve the ancestors of a specific node (part, section, etc.) within a CFR title.",
+      "example": "await ecfr.ancestry('2024-01-01', 40, { part: '60' })"
+    },
+    {
+      "id": "ecfr.versions",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.versions(title, query?)",
+      "description": "List section-level version history for a CFR title.",
+      "example": "await ecfr.versions(40, { 'issue_date[gte]': '2023-01-01' })"
+    },
+    {
+      "id": "ecfr.full",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.full(date, title, query?)",
+      "description": "Return the full XML for a CFR title on a given date. Large; filter via query (chapter/part/section) when possible.",
+      "example": "await ecfr.full('2024-01-01', 40, { part: '60' })"
+    },
+    {
+      "id": "ecfr.search.results",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.search.results(params)",
+      "description": "Full-text search across the eCFR (Electronic Code of Federal Regulations). Search the consolidated CFR regulations text by query string. Filter by agency, date, hierarchy (title/chapter/part/section).",
+      "example": "await ecfr.search.results({ query: 'greenhouse gas', agency_slugs: ['environmental-protection-agency'], per_page: 20 })"
+    },
+    {
+      "id": "ecfr.search.counts_hierarchy",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.search.counts_hierarchy(params)",
+      "description": "Result count grouped by CFR hierarchy node.",
+      "example": "await ecfr.search.counts_hierarchy({ query: 'greenhouse gas' })"
+    },
+    {
+      "id": "ecfr.search.counts_titles",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.search.counts_titles(params)",
+      "description": "Result count grouped by CFR title.",
+      "example": "await ecfr.search.counts_titles({ query: 'methane' })"
+    },
+    {
+      "id": "ecfr.search.counts_daily",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.search.counts_daily(params)",
+      "description": "Time-series of result counts across the corpus.",
+      "example": "await ecfr.search.counts_daily({ query: 'pfas' })"
+    },
+    {
+      "id": "ecfr.search.suggestions",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.search.suggestions(params)",
+      "description": "Autocomplete suggestions for an eCFR search query.",
+      "example": "await ecfr.search.suggestions({ query: 'green' })"
+    }
+  ],
+  "fields": [
+    {
+      "id": "fr.document.document_number",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Unique Federal Register document number (e.g. '2024-12345'). Primary key for get/getMany."
+    },
+    {
+      "id": "fr.document.title",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Document title as it appears in the Federal Register."
+    },
+    {
+      "id": "fr.document.abstract",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Plain-text abstract of the document."
+    },
+    {
+      "id": "fr.document.publication_date",
+      "kind": "field",
+      "binding": "fr",
+      "description": "ISO date the document was published. Filter via conditions.publication_date.{is,gte,lte,year}."
+    },
+    {
+      "id": "fr.document.effective_date",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Effective date for rules. Filter via conditions.effective_date."
+    },
+    {
+      "id": "fr.document.type",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Document type: 'Rule' (RULE), 'Proposed Rule' (PRORULE), 'Notice' (NOTICE), 'Presidential Document' (PRESDOCU)."
+    },
+    {
+      "id": "fr.document.agencies",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Issuing agencies. Filter via conditions.agencies[] using agency slug."
+    },
+    {
+      "id": "fr.document.docket_ids",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Agency docket identifiers associated with the document."
+    },
+    {
+      "id": "fr.document.significant",
+      "kind": "field",
+      "binding": "fr",
+      "description": "1 if the document is flagged as Significant under EO 12866."
+    },
+    {
+      "id": "fr.document.cfr_references",
+      "kind": "field",
+      "binding": "fr",
+      "description": "List of CFR title/part references touched by the document."
+    },
+    {
+      "id": "fr.document.executive_order_number",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Executive order number for presidential documents."
+    },
+    {
+      "id": "fr.document.html_url",
+      "kind": "field",
+      "binding": "fr",
+      "description": "Canonical federalregister.gov URL for the document."
+    },
+    {
+      "id": "fr.document.pdf_url",
+      "kind": "field",
+      "binding": "fr",
+      "description": "URL to the official PDF on govinfo.gov."
+    },
+    {
+      "id": "fr.document.body_html_url",
+      "kind": "field",
+      "binding": "fr",
+      "description": "URL to the rendered body HTML of the document."
+    },
+
+    {
+      "id": "ecfr.section.identifier",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "Hierarchical identifier for a CFR section, e.g. '40 CFR 60.1'."
+    },
+    {
+      "id": "ecfr.section.label",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "Human-readable label for a CFR node."
+    },
+    {
+      "id": "ecfr.title.number",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "CFR title number (1-50)."
+    },
+    {
+      "id": "ecfr.title.latest_amended_on",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "Most recent amendment date for the title."
+    },
+    {
+      "id": "ecfr.title.latest_issue_date",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "Latest annual edition issue date for the title."
+    },
+    {
+      "id": "ecfr.search.hits.hierarchy.title",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "CFR title containing a search hit."
+    },
+    {
+      "id": "ecfr.search.hits.hierarchy.part",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "CFR part containing a search hit."
+    },
+    {
+      "id": "ecfr.search.hits.hierarchy.section",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "CFR section containing a search hit."
+    },
+    {
+      "id": "ecfr.search.hits.score",
+      "kind": "field",
+      "binding": "ecfr",
+      "description": "Relevance score for a search hit."
+    }
+  ]
+}
