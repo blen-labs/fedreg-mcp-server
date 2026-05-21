@@ -41,5 +41,5 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blencorp/fedreg-mcp-server/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/blencorp/fedreg-mcp-server/releases/tag/v1.0.0
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/blen-labs/fedreg-mcp-server/releases/tag/v1.0.0

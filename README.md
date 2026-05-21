@@ -1,6 +1,6 @@
 # Federal Register MCP Server
 
-[![CI](https://github.com/blencorp/fedreg-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/blencorp/fedreg-mcp-server/actions/workflows/ci.yml)
+[![CI](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@blen/fedreg-mcp-server.svg)](https://www.npmjs.com/package/@blen/fedreg-mcp-server)
 [![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520.10-339933.svg)](https://nodejs.org/)
@@ -142,7 +142,7 @@ CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--ins
 
 ## Security
 
-User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a wall-clock timeout, and a heap cap. The full threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blencorp/fedreg-mcp-server/security/advisories/new) rather than a public issue.
+User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a wall-clock timeout, and a heap cap. The full threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new) rather than a public issue.
 
 ## Contributing
 
@@ -164,4 +164,4 @@ Contributions are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the
 
 BLEN, Inc is a digital services company that provides Emerging Technology (ML/AI, RPA), Digital Modernization (Legacy to Cloud), and Human-Centered Web/Mobile Design and Development.
 
-Built with ❤️ by [BLEN, Inc](https://www.blencorp.com).
+Built with ❤️ by [BLEN, Inc](https://www.blenlabs.com).

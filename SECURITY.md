@@ -5,10 +5,10 @@
 Please **do not file public GitHub issues for security reports**. Instead,
 open a private GitHub Security Advisory:
 
-> <https://github.com/blencorp/fedreg-mcp-server/security/advisories/new>
+> <https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new>
 
 If that's not available, contact the maintainers via the GitHub organization
-page at <https://github.com/blencorp>.
+page at <https://github.com/blen-labs>.
 
 We try to respond within **3 business days**. A typical timeline for a
 confirmed sandbox-escape report:

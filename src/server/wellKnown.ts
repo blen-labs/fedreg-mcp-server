@@ -12,7 +12,7 @@ export function oauthProtectedResource(cfg: AuthConfig, resourceUrl: string) {
     authorization_servers: cfg.issuer ? [cfg.issuer] : [],
     bearer_methods_supported: ['header'],
     scopes_supported: cfg.scopes ?? [],
-    resource_documentation: 'https://github.com/blencorp/fedreg-mcp-server#auth',
+    resource_documentation: 'https://github.com/blen-labs/fedreg-mcp-server#auth',
     resource_name: 'Federal Register & eCFR MCP Server',
   };
 }

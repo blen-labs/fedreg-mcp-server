@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "description": "Code-mode MCP server for the U.S. Federal Register and Electronic Code of Federal Regulations APIs.",
   "license": "Apache-2.0",
-  "author": "BLEN, Inc. (https://blencorp.com)",
-  "homepage": "https://github.com/blencorp/fedreg-mcp-server#readme",
+  "author": "BLEN, Inc. (https://blenlabs.com)",
+  "homepage": "https://github.com/blen-labs/fedreg-mcp-server#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blencorp/fedreg-mcp-server.git"
+    "url": "git+https://github.com/blen-labs/fedreg-mcp-server.git"
   },
   "bugs": {
-    "url": "https://github.com/blencorp/fedreg-mcp-server/issues"
+    "url": "https://github.com/blen-labs/fedreg-mcp-server/issues"
   },
   "keywords": [
     "mcp",
