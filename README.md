@@ -6,6 +6,14 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A520.10-339933.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-1.29-7c3aed.svg)](https://modelcontextprotocol.io/)
 
+<p align="center">
+  <a href="https://github.com/blen-labs/fedreg-mcp-server/raw/main/media/fedreg-launch.mp4">
+    <img src="media/launch-poster.png" alt="Federal Register MCP Server — launch video" width="760">
+  </a>
+  <br />
+  <sub>▶ <a href="https://github.com/blen-labs/fedreg-mcp-server/raw/main/media/fedreg-launch.mp4">Watch the 36-second launch video</a></sub>
+</p>
+
 **Ask your AI assistant real questions about U.S. federal regulations — and get answers grounded in the official Federal Register and eCFR.**
 
 This is a [Model Context Protocol](https://modelcontextprotocol.io) server that connects any MCP client (Claude Desktop, and others) to two official U.S. government sources:
