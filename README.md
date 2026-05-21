@@ -7,11 +7,7 @@
 [![MCP](https://img.shields.io/badge/MCP-1.29-7c3aed.svg)](https://modelcontextprotocol.io/)
 
 <p align="center">
-  <a href="https://github.com/blen-labs/fedreg-mcp-server/raw/main/media/fedreg-launch.mp4">
-    <img src="media/launch-poster.png" alt="Federal Register MCP Server — launch video" width="760">
-  </a>
-  <br />
-  <sub>▶ <a href="https://github.com/blen-labs/fedreg-mcp-server/raw/main/media/fedreg-launch.mp4">Watch the 36-second launch video</a></sub>
+  <video src="https://github.com/blen-labs/fedreg-mcp-server/raw/main/media/fedreg-launch.mp4" poster="https://raw.githubusercontent.com/blen-labs/fedreg-mcp-server/main/media/launch-poster.png" controls muted playsinline width="760"></video>
 </p>
 
 **Ask your AI assistant real questions about U.S. federal regulations — and get answers grounded in the official Federal Register and eCFR.**
