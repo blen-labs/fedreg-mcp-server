@@ -28,7 +28,7 @@ export function buildSdk(cfg: SdkConfig) {
   return {
     fr: new FederalRegisterClient(frHttp),
     ecfr: new EcfrClient(ecfrHttp),
-    version: () => '0.1.0-alpha.0',
+    version: () => '1.0.0',
   };
 }
 

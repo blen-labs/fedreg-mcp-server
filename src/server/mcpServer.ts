@@ -5,7 +5,7 @@ import { log } from '../util/logger.js';
 
 export function buildMcpServer(deps: CatalogDeps): Server {
   const server = new Server(
-    { name: 'fedreg-mcp-server', version: '0.1.0-alpha.0' },
+    { name: 'fedreg-mcp-server', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
 
