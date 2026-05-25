@@ -16,6 +16,16 @@ describe('bm25', () => {
   it('tokenizes', () => {
     expect(tokenize('Hello, world! THE quick brown fox.')).toEqual(['hello', 'world', 'quick', 'brown', 'fox']);
   });
+
+  it('scores relevant docs higher', () => {
+    const idx = new Bm25Index();
+    idx.add({ id: 'a', text: 'methane emissions rule from the EPA' });
+    idx.add({ id: 'b', text: 'aviation safety notice' });
+    idx.add({ id: 'c', text: 'methane reporting requirements' });
+    const hits = idx.search('methane', 5);
+    expect(hits[0]).toBeDefined();
+    expect(['a', 'c']).toContain(hits[0]!.id);
+  });
 });
 
 describe('corpus', () => {
@@ -30,6 +40,11 @@ describe('search_api tool', () => {
   it('finds the eCFR search endpoint', () => {
     const { hits } = searchApi({ query: 'search the code of federal regulations text', k: 5 }, corpus());
     expect(hits.some(h => h.id === 'ecfr.search.results')).toBe(true);
+  });
+
+  it('finds Federal Register document search for an agency query', () => {
+    const { hits } = searchApi({ query: 'search federal register documents by agency', k: 5 }, corpus());
+    expect(hits.some(h => h.id === 'fr.documents.search' || h.id.startsWith('fr.agencies'))).toBe(true);
   });
 });
 
