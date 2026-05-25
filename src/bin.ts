@@ -68,8 +68,10 @@ async function main(): Promise<void> {
       return Number.isFinite(n) && n >= 0 ? n : 30;
     })(),
     regsRatePerHour: (() => {
+      // Require >= 1: a rate of 0 would silently block ALL regs calls (it is NOT
+      // "unlimited"). To disable regs, leave FEDREG_REGS_API_KEY unset instead.
       const n = Number(process.env.FEDREG_REGS_RATE_PER_HOUR ?? 1000);
-      return Number.isFinite(n) && n >= 0 ? n : 1000;
+      return Number.isFinite(n) && n >= 1 ? n : 1000;
     })(),
   });
 
