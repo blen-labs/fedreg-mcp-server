@@ -36,7 +36,7 @@ export function buildCatalog(deps: CatalogDeps): ToolDescriptor[] {
     {
       name: 'execute',
       description:
-        'Run TypeScript inside a sandbox (no net, fs, env, or subprocess). Globals `fr` and `ecfr` proxy to FederalRegister.gov and eCFR. Return the awaited expression as the result.',
+        `Run TypeScript inside a sandbox (no net, fs, env, or subprocess). Globals: ${deps.sdk.registeredNames.join(', ')}. Return the awaited expression as the result.`,
       inputSchema: zodToJsonSchema(ExecuteInput),
       handler: async (args) => execute(ExecuteInput.parse(args), deps),
     },

@@ -1,12 +1,8 @@
-/**
- * The runtime "shape" we expose to sandboxed user code.
- * The sandbox receives a synchronous-looking RPC proxy that forwards to the host SDK.
- */
-import type { Sdk } from './bindings.js';
+import type { SourceMeta } from './sources/source.js';
 
 export interface RpcRequest {
-  binding: 'fr' | 'ecfr';
-  path: string[];           // e.g. ['documents', 'search']
+  binding: string;
+  path: string[];
   args: unknown[];
 }
 
@@ -16,20 +12,32 @@ export interface RpcResponse {
   error?: { name: string; message: string; status?: number };
 }
 
-export async function dispatch(sdk: Sdk, req: RpcRequest): Promise<RpcResponse> {
+export interface DispatchRegistry {
+  clients: Record<string, object>;
+  meta: SourceMeta[];
+}
+
+export async function dispatch(reg: DispatchRegistry, req: RpcRequest): Promise<RpcResponse> {
+  const client = reg.clients[req.binding];
+  if (!client) {
+    const m = reg.meta.find(x => x.name === req.binding);
+    if (m && !m.enabled) {
+      return { ok: false, error: { name: 'SourceUnavailable', message: m.disabledReason ?? `${m.label} is unavailable` } };
+    }
+    return { ok: false, error: { name: 'TypeError', message: `Cannot resolve binding '${req.binding}'` } };
+  }
   try {
-    const root = req.binding === 'fr' ? (sdk.fr as unknown as Record<string, unknown>) : (sdk.ecfr as unknown as Record<string, unknown>);
-    let cur: unknown = root;
-    let parent: unknown = root;
+    let cur: unknown = client;
+    let parent: unknown = client;
     for (const seg of req.path) {
       if (cur === null || typeof cur !== 'object') {
-        return { ok: false, error: { name: 'TypeError', message: `Cannot resolve ${req.path.join('.')}` } };
+        return { ok: false, error: { name: 'TypeError', message: `Cannot resolve ${req.binding}.${req.path.join('.')}` } };
       }
       parent = cur;
       cur = (cur as Record<string, unknown>)[seg];
     }
     if (typeof cur !== 'function') {
-      return { ok: false, error: { name: 'TypeError', message: `${req.path.join('.')} is not a function` } };
+      return { ok: false, error: { name: 'TypeError', message: `${req.binding}.${req.path.join('.')} is not a function` } };
     }
     const value = await (cur as (...a: unknown[]) => unknown).apply(parent, req.args);
     return { ok: true, value };

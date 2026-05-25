@@ -21,6 +21,7 @@ beforeAll(async () => {
   const sdk = buildSdk({
     frBaseUrl: 'https://www.federalregister.gov/api/v1',
     ecfrBaseUrl: 'https://www.ecfr.gov/api',
+    regsBaseUrl: 'https://api.regulations.gov',
     userAgent: 'test/0.0',
     timeoutMs: 5000,
     retries: 0,
@@ -196,6 +197,7 @@ describe('Auth enforcement', () => {
     const sdk = buildSdk({
       frBaseUrl: 'https://www.federalregister.gov/api/v1',
       ecfrBaseUrl: 'https://www.ecfr.gov/api',
+      regsBaseUrl: 'https://api.regulations.gov',
       userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
     });
     const sandbox = await pickSandbox('auto');

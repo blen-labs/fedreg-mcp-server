@@ -9,6 +9,8 @@ import type { SandboxKind } from '../sandbox/types.js';
 export interface SupervisorConfig {
   frBaseUrl: string;
   ecfrBaseUrl: string;
+  regsBaseUrl: string;
+  regsApiKey?: string;
   userAgent: string;
   upstreamTimeoutMs: number;
   upstreamRetries: number;
@@ -21,6 +23,8 @@ export async function buildSupervisor(cfg: SupervisorConfig): Promise<CatalogDep
   const sdk = buildSdk({
     frBaseUrl: cfg.frBaseUrl,
     ecfrBaseUrl: cfg.ecfrBaseUrl,
+    regsBaseUrl: cfg.regsBaseUrl,
+    regsApiKey: cfg.regsApiKey,
     userAgent: cfg.userAgent,
     timeoutMs: cfg.upstreamTimeoutMs,
     retries: cfg.upstreamRetries,
