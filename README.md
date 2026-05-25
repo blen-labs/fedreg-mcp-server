@@ -51,7 +51,7 @@ const rules = await fr.documents.search({
 
 - **Three official sources, one server** — the full Federal Register v1 (`fr.*`), eCFR (`ecfr.*`), and regulations.gov v4 (`regs.*`) APIs behind one tool.
 - **Code mode, not tool sprawl** — the model writes TypeScript against typed `fr` / `ecfr` / `regs` SDKs instead of juggling dozens of single-purpose tools.
-- **Safe by construction** — user code runs in an `isolated-vm` (or Deno) sandbox with **no network, filesystem, env, or subprocess access**. The only way out is the two government APIs.
+- **Safe by construction** — user code runs in an `isolated-vm` (or Deno) sandbox with **no network, filesystem, env, or subprocess access**. The only way out is the three upstream government APIs.
 - **Runs anywhere MCP does** — stdio for Claude Desktop, or a remote Streamable HTTP server with OAuth, rate limiting, and quotas.
 - **Discovery built in** — `search_api` and `describe_schema` help the model (and you) find the right call fast.
 
