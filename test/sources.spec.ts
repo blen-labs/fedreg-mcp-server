@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getSources } from '../src/sdk/sources/index.js';
+import { getSources, validateSourceNames } from '../src/sdk/sources/index.js';
 
 function cfg(extra = {}) {
   return {
@@ -22,10 +22,32 @@ describe('source registry', () => {
     expect(fr!.label).toBe('Federal Register');
   });
 
+  // Forward-looking regression guard: only becomes meaningful once the regs source
+  // injects an API key (Task 10); fr/ecfr carry no secret today.
   it('never exposes secrets on the source object', () => {
     const sources = getSources(cfg());
     for (const s of sources) {
       expect(JSON.stringify(s)).not.toContain('X-Api-Key');
     }
+  });
+});
+
+describe('validateSourceNames', () => {
+  it('throws for an invalid identifier', () => {
+    expect(() => validateSourceNames([{ name: 'fr.docs' }])).toThrow(/must be a JS identifier/);
+    expect(() => validateSourceNames([{ name: '9bad' }])).toThrow(/must be a JS identifier/);
+  });
+
+  it('throws for a denylisted name', () => {
+    expect(() => validateSourceNames([{ name: 'console' }])).toThrow(/not allowed/);
+    expect(() => validateSourceNames([{ name: 'process' }])).toThrow(/not allowed/);
+  });
+
+  it('throws for a duplicate name', () => {
+    expect(() => validateSourceNames([{ name: 'fr' }, { name: 'fr' }])).toThrow(/Duplicate/);
+  });
+
+  it('does not throw for valid distinct first-party names', () => {
+    expect(() => validateSourceNames([{ name: 'fr' }, { name: 'ecfr' }, { name: 'regs' }])).not.toThrow();
   });
 });
