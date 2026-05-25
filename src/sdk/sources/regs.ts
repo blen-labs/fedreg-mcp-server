@@ -11,6 +11,7 @@ export function createRegsSource(cfg: SourceConfig): Source {
     retries: cfg.retries, cacheTtlMs: cfg.cacheTtlMs, cacheMaxItems: cfg.cacheMaxItems,
     retry429: false,
     ...(enabled ? { defaultHeaders: { 'X-Api-Key': key! } } : {}),
+    ...(cfg.regsPreflightLimiter ? { preflightLimiter: cfg.regsPreflightLimiter } : {}),
     ...(cfg.dispatcher ? { dispatcher: cfg.dispatcher } : {}),
   });
   return {

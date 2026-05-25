@@ -13,6 +13,7 @@ export interface HttpClientOptions {
   dispatcher?: Dispatcher;
   defaultHeaders?: Record<string, string>;
   retry429?: boolean;
+  preflightLimiter?: { tryTake(): boolean; secondsUntilNext?(): number };
 }
 
 export interface CallOptions {
@@ -34,6 +35,7 @@ export class HttpClient {
   private readonly retries: number;
   private readonly retry429: boolean;
   private readonly dispatcher?: Dispatcher;
+  private readonly preflightLimiter?: { tryTake(): boolean; secondsUntilNext?(): number };
 
   constructor(opts: HttpClientOptions) {
     this.#defaultHeaders = opts.defaultHeaders ?? {};
@@ -43,6 +45,7 @@ export class HttpClient {
     this.retries = opts.retries ?? 3;
     this.retry429 = opts.retry429 ?? true;
     this.dispatcher = opts.dispatcher;
+    this.preflightLimiter = opts.preflightLimiter;
     const max = opts.cacheMaxItems ?? 2000;
     const ttl = opts.cacheTtlMs ?? 300_000;
     this.cacheEnabled = max > 0 && ttl > 0;
@@ -62,6 +65,13 @@ export class HttpClient {
       o.accept === 'xml' ? 'application/xml,text/xml'
       : o.accept === 'text' ? 'text/plain'
       : 'application/json';
+
+    if (this.preflightLimiter && !this.preflightLimiter.tryTake()) {
+      const wait = this.preflightLimiter.secondsUntilNext?.() ?? 0;
+      const err = new HttpError(`${method} ${url} -> upstream rate limit reached${Number.isFinite(wait) && wait > 0 ? ` (retry in ~${wait}s)` : ''}`, 429, '');
+      err.name = 'RegsRateLimited';
+      throw err;
+    }
 
     let attempt = 0;
     let lastErr: unknown;

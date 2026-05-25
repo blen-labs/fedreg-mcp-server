@@ -24,4 +24,5 @@ export interface SourceConfig {
   cacheTtlMs: number;
   cacheMaxItems: number;
   dispatcher?: Dispatcher;
+  regsPreflightLimiter?: { tryTake(): boolean; secondsUntilNext?(): number };
 }

@@ -79,4 +79,20 @@ describe('HttpClient default headers + 429', () => {
     expect(first).toEqual({ n: 1 });
     expect(second).toEqual({ n: 1 });
   });
+
+  it('throws RegsRateLimited when the preflight limiter is exhausted', async () => {
+    const limiter = { tryTake: () => false, secondsUntilNext: () => 5 };
+    const c = client({ preflightLimiter: limiter });
+    await expect(c.call({ path: '/v4/z' })).rejects.toMatchObject({ name: 'RegsRateLimited' });
+  });
+
+  it('does not consume the preflight limiter on a cache hit', async () => {
+    let takes = 0;
+    const limiter = { tryTake: () => { takes++; return true; }, secondsUntilNext: () => 0 };
+    agent.get(ORIGIN).intercept({ path: '/v4/c', method: 'GET' }).reply(200, { n: 1 }); // ONE interceptor
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100, preflightLimiter: limiter });
+    await c.call({ path: '/v4/c' }); // miss -> takes 1
+    await c.call({ path: '/v4/c' }); // hit -> no take
+    expect(takes).toBe(1);
+  });
 });
