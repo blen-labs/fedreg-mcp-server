@@ -1,5 +1,6 @@
 import { request, type Dispatcher } from 'undici';
 import { LRUCache } from 'lru-cache';
+import { createHash } from 'node:crypto';
 import { log } from './logger.js';
 
 export interface HttpClientOptions {
@@ -51,7 +52,7 @@ export class HttpClient {
   async call<T = unknown>(o: CallOptions): Promise<T> {
     const url = this.buildUrl(o.path, o.query);
     const method = o.method ?? 'GET';
-    const key = method === 'GET' && this.cacheEnabled ? url : '';
+    const key = method === 'GET' && this.cacheEnabled ? this.cacheKey(url, o.headers) : '';
     if (key && this.cache.has(key)) {
       log.debug('http.cache_hit', { url });
       return this.cache.get(key)!.body as T;
@@ -110,6 +111,16 @@ export class HttpClient {
       }
     }
     throw lastErr;
+  }
+
+  private cacheKey(url: string, perCallHeaders?: Record<string, string>): string {
+    const merged = { ...this.#defaultHeaders, ...(perCallHeaders ?? {}) };
+    const entries = Object.entries(merged);
+    if (entries.length === 0) return url; // fr/ecfr: bare URL key, unchanged
+    const normalized: Record<string, string> = {};
+    for (const [k, v] of entries.sort(([a], [b]) => a.localeCompare(b))) normalized[k.toLowerCase()] = v;
+    const hash = createHash('sha256').update(JSON.stringify(normalized)).digest('hex').slice(0, 16);
+    return `${url}\n${hash}`;
   }
 
   private buildUrl(path: string, query?: CallOptions['query']): string {

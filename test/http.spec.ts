@@ -60,4 +60,23 @@ describe('HttpClient default headers + 429', () => {
     const c = client({ retry429: false });
     await expect(c.call({ path: '/lim' })).rejects.toMatchObject({ name: 'RateLimited' });
   });
+
+  it('does not serve a cached response across different per-call auth headers', async () => {
+    agent.get(ORIGIN).intercept({ path: '/v4/x', method: 'GET' }).reply(200, { who: 'A' });
+    agent.get(ORIGIN).intercept({ path: '/v4/x', method: 'GET' }).reply(200, { who: 'B' });
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100 }); // cache ON
+    const a = await c.call({ path: '/v4/x', headers: { 'X-Api-Key': 'A' } });
+    const b = await c.call({ path: '/v4/x', headers: { 'X-Api-Key': 'B' } });
+    expect(a).toEqual({ who: 'A' });
+    expect(b).toEqual({ who: 'B' }); // different key must NOT be served the cached 'A'
+  });
+
+  it('still serves a cached response for the same URL + same auth', async () => {
+    agent.get(ORIGIN).intercept({ path: '/v4/y', method: 'GET' }).reply(200, { n: 1 }); // only ONE interceptor
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100 });
+    const first = await c.call({ path: '/v4/y', headers: { 'X-Api-Key': 'A' } });
+    const second = await c.call({ path: '/v4/y', headers: { 'X-Api-Key': 'A' } }); // from cache; no 2nd interceptor
+    expect(first).toEqual({ n: 1 });
+    expect(second).toEqual({ n: 1 });
+  });
 });
