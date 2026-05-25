@@ -10,6 +10,8 @@ export interface HttpClientOptions {
   cacheTtlMs?: number;
   cacheMaxItems?: number;
   dispatcher?: Dispatcher;
+  defaultHeaders?: Record<string, string>;
+  retry429?: boolean;
 }
 
 export interface CallOptions {
@@ -22,16 +24,28 @@ export interface CallOptions {
 }
 
 export class HttpClient {
+  #defaultHeaders: Record<string, string>;
   private readonly cache: LRUCache<string, { status: number; body: unknown; headers: Record<string, string> }>;
   private readonly cacheEnabled: boolean;
-  constructor(private readonly opts: HttpClientOptions) {
+  private readonly baseUrl: string;
+  private readonly userAgent: string;
+  private readonly timeoutMs: number;
+  private readonly retries: number;
+  private readonly retry429: boolean;
+  private readonly dispatcher?: Dispatcher;
+
+  constructor(opts: HttpClientOptions) {
+    this.#defaultHeaders = opts.defaultHeaders ?? {};
+    this.baseUrl = opts.baseUrl;
+    this.userAgent = opts.userAgent ?? 'fedreg-mcp-server/1.0 (+https://github.com/blen-labs/fedreg-mcp-server)';
+    this.timeoutMs = opts.timeoutMs ?? 20_000;
+    this.retries = opts.retries ?? 3;
+    this.retry429 = opts.retry429 ?? true;
+    this.dispatcher = opts.dispatcher;
     const max = opts.cacheMaxItems ?? 2000;
     const ttl = opts.cacheTtlMs ?? 300_000;
     this.cacheEnabled = max > 0 && ttl > 0;
-    this.cache = new LRUCache({
-      max: Math.max(max, 1),
-      ttl: Math.max(ttl, 1),
-    });
+    this.cache = new LRUCache({ max: Math.max(max, 1), ttl: Math.max(ttl, 1) });
   }
 
   async call<T = unknown>(o: CallOptions): Promise<T> {
@@ -48,40 +62,39 @@ export class HttpClient {
       : o.accept === 'text' ? 'text/plain'
       : 'application/json';
 
-    const retries = this.opts.retries ?? 3;
     let attempt = 0;
     let lastErr: unknown;
-    while (attempt <= retries) {
+    while (attempt <= this.retries) {
       try {
         const res = await request(url, {
           method,
           headers: {
             'accept': accept,
-            'user-agent': this.opts.userAgent ?? 'fedreg-mcp-server/1.0 (+https://github.com/blen-labs/fedreg-mcp-server)',
+            'user-agent': this.userAgent,
+            ...this.#defaultHeaders,
             ...(o.body ? { 'content-type': 'application/json' } : {}),
             ...(o.headers ?? {}),
           },
           body: o.body ? JSON.stringify(o.body) : undefined,
-          bodyTimeout: this.opts.timeoutMs ?? 20_000,
-          headersTimeout: this.opts.timeoutMs ?? 20_000,
-          ...(this.opts.dispatcher ? { dispatcher: this.opts.dispatcher } : {}),
+          bodyTimeout: this.timeoutMs,
+          headersTimeout: this.timeoutMs,
+          ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
         });
 
-        if (res.statusCode >= 500 || res.statusCode === 429) {
-          const text = await res.body.text();
-          throw new HttpError(`${method} ${url} -> ${res.statusCode}`, res.statusCode, text);
-        }
         if (res.statusCode >= 400) {
           const text = await res.body.text();
-          throw new HttpError(`${method} ${url} -> ${res.statusCode}`, res.statusCode, text);
+          const err = new HttpError(`${method} ${url} -> ${res.statusCode}`, res.statusCode, text);
+          if (res.statusCode === 429) {
+            const retryAfter = Array.isArray(res.headers['retry-after']) ? res.headers['retry-after'][0] : res.headers['retry-after'];
+            err.name = 'RateLimited';
+            err.message = `${method} ${url} -> 429 Too Many Requests${retryAfter ? ` (retry-after ${retryAfter})` : ''}`;
+          }
+          throw err;
         }
 
         let body: unknown;
-        if (accept.startsWith('application/json')) {
-          body = await res.body.json();
-        } else {
-          body = await res.body.text();
-        }
+        if (accept.startsWith('application/json')) body = await res.body.json();
+        else body = await res.body.text();
         const headers: Record<string, string> = {};
         for (const [k, v] of Object.entries(res.headers)) headers[k] = Array.isArray(v) ? v.join(',') : String(v ?? '');
         if (key) this.cache.set(key, { status: res.statusCode, body, headers });
@@ -89,8 +102,8 @@ export class HttpClient {
       } catch (err) {
         lastErr = err;
         const status = err instanceof HttpError ? err.status : 0;
-        const retryable = status === 0 || status === 429 || status >= 500;
-        if (!retryable || attempt === retries) break;
+        const retryable = status === 0 || (status === 429 && this.retry429) || status >= 500;
+        if (!retryable || attempt === this.retries) break;
         const delay = Math.min(2 ** attempt * 250, 4000);
         await new Promise(r => setTimeout(r, delay));
         attempt++;
@@ -100,7 +113,7 @@ export class HttpClient {
   }
 
   private buildUrl(path: string, query?: CallOptions['query']): string {
-    const base = this.opts.baseUrl.replace(/\/$/, '');
+    const base = this.baseUrl.replace(/\/$/, '');
     const p = path.startsWith('/') ? path : '/' + path;
     const url = new URL(base + p);
     if (query) {
