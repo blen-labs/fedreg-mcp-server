@@ -73,6 +73,10 @@ async function main(): Promise<void> {
       const n = Number(process.env.FEDREG_REGS_RATE_PER_HOUR ?? 1000);
       return Number.isFinite(n) && n >= 1 ? n : 1000;
     })(),
+    regsSubjectRatePerHour: (() => {
+      const n = Number(process.env.FEDREG_REGS_SUBJECT_RATE_PER_HOUR ?? 500);
+      return Number.isFinite(n) && n >= 1 ? n : 500;
+    })(),
   });
 
   let handle: HttpHandle | undefined;

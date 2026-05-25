@@ -3,6 +3,7 @@ import { getSources } from '../sdk/sources/index.js';
 import { buildCorpus } from '../search/corpus.js';
 import { pickSandbox } from '../sandbox/index.js';
 import { TokenBucket } from '../util/tokenBucket.js';
+import { SubjectQuota } from '../util/quotas.js';
 import type { CatalogDeps } from '../server/toolCatalog.js';
 import type { SandboxKind } from '../sandbox/types.js';
 
@@ -19,6 +20,7 @@ export interface SupervisorConfig {
   sandbox: SandboxKind;
   regsMaxCallsPerExecute: number;
   regsRatePerHour: number;
+  regsSubjectRatePerHour: number;
 }
 
 export async function buildSupervisor(cfg: SupervisorConfig): Promise<CatalogDeps> {
@@ -33,5 +35,6 @@ export async function buildSupervisor(cfg: SupervisorConfig): Promise<CatalogDep
   const sdk = buildSdk(sourceCfg);
   const corpus = buildCorpus(sources);
   const sandbox = await pickSandbox(cfg.sandbox);
-  return { sdk, sandbox, corpus, regsMaxCallsPerExecute: cfg.regsMaxCallsPerExecute };
+  const regsSubjectQuota = new SubjectQuota(cfg.regsSubjectRatePerHour, 60 * 60 * 1000);
+  return { sdk, sandbox, corpus, regsMaxCallsPerExecute: cfg.regsMaxCallsPerExecute, regsSubjectQuota };
 }

@@ -128,7 +128,9 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
               log.info('mcp.session.close', { sessionId: id, subject });
             },
           });
-          const mcp = buildMcpServer(deps);
+          // The subject is captured once at session init; in current MCP usage one
+          // session corresponds to one authenticated user, so it is stable for the session.
+          const mcp = buildMcpServer(deps, { subject });
           await mcp.connect(transport);
         }
 
