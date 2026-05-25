@@ -23,11 +23,16 @@ let cached: { index: Bm25Index; entries: Map<string, CorpusEntry> } | null = nul
 
 export function getCorpus(): { index: Bm25Index; entries: Map<string, CorpusEntry> } {
   if (cached) return cached;
-  const path = resolve(__dirname, '../../schema/field-dictionary.json');
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as FieldDictionary;
   const index = new Bm25Index();
   const entries = new Map<string, CorpusEntry>();
-  for (const e of [...raw.endpoints, ...raw.fields]) {
+  const sourceFiles = ['fr', 'ecfr'];
+  const merged: CorpusEntry[] = [];
+  for (const name of sourceFiles) {
+    const path = resolve(__dirname, `../../schema/${name}.json`);
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as FieldDictionary;
+    merged.push(...raw.endpoints, ...raw.fields);
+  }
+  for (const e of merged) {
     entries.set(e.id, e);
     index.add({
       id: e.id,
