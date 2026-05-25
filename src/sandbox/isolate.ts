@@ -67,10 +67,11 @@ export class IsolateRunner implements SandboxRunner {
     // RPC bridge — pass the host function directly; `arguments: { reference: true }`
     // auto-wraps each argument as a Reference inside the isolate.
     const hostRpc = async (binding: string, path: string[], args: unknown[]) => {
-      const result = await rpc.dispatch({ binding: binding as 'fr' | 'ecfr', path, args });
+      const result = await rpc.dispatch({ binding, path, args });
       return new ivm.ExternalCopy(result).copyInto();
     };
 
+    const namesLiteral = JSON.stringify(opts.bindings ?? []);
     await context.evalClosure(
       `function makeProxy(binding, rpc) {
          const handler = (path) => new Proxy(function(){}, {
@@ -88,8 +89,7 @@ export class IsolateRunner implements SandboxRunner {
          });
          return handler([]);
        }
-       globalThis.fr = makeProxy('fr', $0);
-       globalThis.ecfr = makeProxy('ecfr', $0);`,
+       for (const name of ${namesLiteral}) { globalThis[name] = makeProxy(name, $0); }`,
       [hostRpc],
       { arguments: { reference: true } },
     );
