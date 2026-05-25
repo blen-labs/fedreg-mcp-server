@@ -69,14 +69,30 @@ exfiltrate it. Without the key, the `regs` source is **disabled**: `regs.*`
 calls return `SourceUnavailable` while `fr` and `ecfr` keep working
 (graceful degradation).
 
-Two rate guardrails protect the upstream quota:
+Four layered rate guardrails protect the shared upstream quota:
 
 - **No-429-retry** — the `regs` `HttpClient` is built with `retry429: false`,
   so a `429` surfaces immediately as `RateLimited` instead of being retried
   (retrying a quota error only burns more of the budget).
 - **Per-execute budget** — at most `FEDREG_REGS_MAX_CALLS_PER_EXECUTE`
   (default `30`) regulations.gov upstream calls per single `execute()` run;
-  exceeding it fails the call rather than fanning out unbounded requests.
+  exceeding it fails the call (`RegsCallBudgetExceeded`) rather than fanning
+  out unbounded requests.
+- **Process-wide token bucket** — a single in-memory bucket caps total `regs`
+  upstream calls to `FEDREG_REGS_RATE_PER_HOUR` (default `1000`/hr) across all
+  sessions and tenants, protecting the shared api.data.gov key; over the limit
+  returns `RegsRateLimited`. It sits *after* the response cache, so cache hits
+  are free. **It is in-memory / single-process and does NOT coordinate across
+  replicas:** N replicas allow up to N× the configured rate against the shared
+  key, so divide the rate by replica count or use per-replica keys.
+- **Per-subject hourly quota** — in HTTP auth mode only,
+  `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` (default `500`/hr) per authenticated
+  subject (over the limit returns `RegsSubjectQuotaExceeded`). Skipped in stdio
+  (no subject). The subject is bound to the MCP session at init; reusing a
+  session id with a different token is rejected (403).
+
+For the two hourly rates, `0` is **not** "unlimited" — it blocks all regs
+calls; to disable the source, leave `FEDREG_REGS_API_KEY` unset.
 
 The full surface lives in [`docs/sdk-reference.md`](./sdk-reference.md).
 
@@ -142,7 +158,9 @@ The HTTP transport also enforces:
 
 `HttpClient` wraps `undici.request` with:
 
-- An in-memory LRU keyed on canonical URL (5 minutes by default).
+- An in-memory LRU keyed on canonical URL **plus a redacted hash of the request's
+  auth headers**, so a cached response is never served across different
+  `X-Api-Key` values (no cross-key cache bleed). 5 minutes by default.
 - Exponential backoff on `429` and `5xx` (3 retries by default).
 - A configurable user agent — please set yours per FederalRegister.gov /
   eCFR etiquette via `FEDREG_USER_AGENT`.

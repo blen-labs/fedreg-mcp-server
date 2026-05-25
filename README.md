@@ -71,6 +71,8 @@ regulations.gov requires a free API key from [api.data.gov / open.gsa.gov](https
 
 Without a key the `regs` source is **disabled** — `regs.*` calls return a clear `SourceUnavailable` error, while `fr` and `ecfr` keep working normally.
 
+Because the regulations.gov key is shared, `regs` upstream calls are bounded by a process-wide hourly bucket (`FEDREG_REGS_RATE_PER_HOUR`), a per-subject hourly quota in HTTP auth mode (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`), and a per-`execute()` call budget (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`). For the two hourly rates, `0` is **not** "unlimited" — it blocks all regs calls; to disable regs entirely, leave `FEDREG_REGS_API_KEY` unset.
+
 ### Bridge example: comments on a Federal Register rule
 
 `frDocNum` is a *returned* attribute on regs documents, not a filter — so bridge from FR to regulations.gov via the document number as a `searchTerm`:
@@ -182,6 +184,8 @@ The most common knobs (full list and defaults in [`.env.example`](./.env.example
 | `FEDREG_REGS_API_KEY` | — | Free key from regulations.gov / api.data.gov. Unset ⇒ `regs` disabled (fr/ecfr unaffected). |
 | `FEDREG_REGS_BASE_URL` | `https://api.regulations.gov` | regulations.gov v4 API base URL. |
 | `FEDREG_REGS_MAX_CALLS_PER_EXECUTE` | `30` | Caps regulations.gov upstream calls per `execute()` run (rate-limit guardrail). |
+| `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide cap on regs upstream calls/hour (protects the shared key). In-memory; with N replicas, divide by N. Must be ≥ 1. |
+| `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-authenticated-subject regs calls/hour (HTTP auth mode only). Must be ≥ 1. |
 | `FEDREG_AUTH_PROVIDER` | `none` | `none` / `embedded` / `generic-oidc` / `clerk` / `workos` / `auth0` |
 | `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (used in OAuth metadata). |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |

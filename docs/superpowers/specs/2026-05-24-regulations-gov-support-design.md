@@ -198,8 +198,7 @@ against live v4 docs during implementation.)
 The shared key's ~1,000/hr bucket is a global ceiling that `FEDREG_SUBJECT_DAILY_QUOTA`
 (charged per MCP request) does NOT protect: one `execute` call can loop and
 `HttpClient` retries 429, so a single tenant could burn the bucket for every tenant.
-v1 ships these lean, in-code guardrails (per-subject/per-key metering deferred behind
-a designed hook):
+v1 ships these layered, in-code guardrails:
 
 - **No 429 retry for regs.** `HttpClient` gains `retry429?: boolean` (default `true`
   to preserve fr/ecfr behavior). `regs` sets it `false`: a 429 surfaces immediately
@@ -210,15 +209,30 @@ a designed hook):
   `RegsCallBudgetExceeded` past a cap (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`, default
   ~30). It counts host-side RPC calls, so it holds regardless of any sandbox loop.
   This bounds per-execute fan-out.
+- **Process-wide token bucket.** A single in-memory bucket caps total `regs`
+  upstream calls to `FEDREG_REGS_RATE_PER_HOUR` (default 1000/hr) across all
+  sessions/tenants, protecting the shared api.data.gov key; over the limit returns
+  `RegsRateLimited`. It sits AFTER the response cache, so cache hits are free.
+  **Caveat:** the bucket is in-memory/single-process — it does NOT coordinate across
+  replicas, so N replicas allow up to N× the configured rate against the shared key
+  (operators should divide the rate by replica count or use per-replica keys). A
+  value of 0 is NOT "unlimited" (it blocks all regs calls); to disable regs, leave
+  `FEDREG_REGS_API_KEY` unset.
+- **Per-subject hourly quota (HTTP auth mode).** `FEDREG_REGS_SUBJECT_RATE_PER_HOUR`
+  (default 500/hr) per authenticated subject; over the limit returns
+  `RegsSubjectQuotaExceeded`. Skipped in stdio (no subject). The subject is bound to
+  the MCP session at init, and a session id reused with a different token is rejected
+  (403).
 - **Caching independently protects the shared bucket.** Each source has its own
   `HttpClient` + LRU; cached GETs never reach api.data.gov, so the existing cache is
   a rate-limit ally — keep it on for regs.
 - The model still writes its own paging loop; the `regs.comments.search` corpus
   example demonstrates the `lastModifiedDate` cursor to get past the ~5,000-result
   cap, within the per-execute budget.
-- **Deferred (designed, not built):** a per-subject / per-shared-key sliding-window
-  meter that rejects before api.data.gov throttles. Operators can also request a
-  rate-limit increase or run per-deployment keys.
+
+In short, four guardrails layer up: no-429-retry → per-execute budget →
+process-wide token bucket → per-subject quota. Operators can also request a
+rate-limit increase or run per-deployment keys.
 
 ### 7. Caching (Codex P2 #4)
 
@@ -227,12 +241,11 @@ Each source gets its OWN `HttpClient` instance with its OWN LRU (as today: `frHt
 are already isolated per source instance. Within single-server-key v1, URL-only
 keying is therefore correct (no actual bug today).
 
-Future-proofing for per-user keys (deferred): when one source instance can see
-multiple keys, the cache key must include a redacted auth-context hash (e.g., a hash
-of the `X-Api-Key`), or caching must be disabled for that source. v1 adds the
-source-scoped cache namespace now (cheap) and leaves the auth-context hash as the
-documented hook for the per-user-key work. A rotation test asserts no cross-key cache
-bleed.
+Auth-aware cache keys are now IMPLEMENTED in v1: the GET response cache key
+includes a redacted hash of the request's auth headers, so a cached response is
+never served across different `X-Api-Key` values — preventing cross-key cache bleed
+even when one source instance sees multiple keys. (The source-scoped cache namespace
+remains in place too.) A rotation test asserts no cross-key cache bleed.
 
 ### 8. Tests (vitest + undici MockAgent, mirroring `test/sdk.spec.ts`)
 
@@ -293,13 +306,17 @@ Deleted / replaced:
 
 - **P1 secret-as-metadata → resolved (§1, §3).** No secret fields on `Source`; key
   held in `HttpClient` `#private`; registry exposes redacted `SourceMeta` only.
-- **P1 shared-key exhaustion → lean guardrails (§6).** No 429 retry for regs +
-  per-execute call budget; per-subject meter deferred behind a hook.
+- **P1 shared-key exhaustion → layered guardrails (§6).** No 429 retry for regs +
+  per-execute call budget + process-wide token bucket (`FEDREG_REGS_RATE_PER_HOUR`)
+  + per-subject hourly quota (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`), all built in v1
+  after a re-run flagged the gap. The bucket is in-memory/single-process (no
+  cross-replica coordination).
 - **P2 disabled-global contradiction → resolved (§3, §4).** `registeredNames` (all)
   drive global injection; `clients` (enabled) drive dispatch; disabled →
   host-side `SourceUnavailable`. Tested in both runners.
 - **P2 URL-only cache → resolved (§7).** Caches are per-source-instance already;
-  source-scoped namespace added; per-user auth-context hash is the documented hook.
+  source-scoped namespace added; the GET cache key now also includes a redacted
+  auth-context hash (built in v1), preventing cross-key cache bleed.
 - **P2 union→string hardening → resolved (§4).** Startup name validation (identifier
   regex + denylist + dedupe); deno injection via `JSON.stringify` only.
 
@@ -309,5 +326,12 @@ Deleted / replaced:
    unwrapping. Consistent with `ecfr.full` returning XML as a string (honest,
    low-magic). Revisit only if the model demonstrably struggles.
 2. **`FEDREG_REGS_MAX_CALLS_PER_EXECUTE = 30`** (default; env-tunable).
-3. **Per-subject / per-key upstream meter → v1.1, not v1.** The v1 hook is the
-   per-execute call budget (§6); the sliding-window meter is deferred.
+3. **Per-subject / per-key upstream meter → INCLUDED in v1.** A re-run of the
+   adversarial review re-flagged shared-key exhaustion, so the meter shipped in v1
+   rather than v1.1: a **process-wide token bucket** (`FEDREG_REGS_RATE_PER_HOUR`,
+   default 1000/hr) caps total regs upstream calls across all sessions/tenants to
+   protect the shared api.data.gov key, plus a **per-subject hourly quota**
+   (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`, default 500/hr) in HTTP auth mode. The
+   bucket is in-memory/single-process — it does NOT coordinate across replicas, so
+   N replicas allow up to N× the configured rate against the shared key (divide the
+   rate by replica count or use per-replica keys).

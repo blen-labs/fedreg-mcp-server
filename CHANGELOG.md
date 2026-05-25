@@ -15,6 +15,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `ecfr` keep working. Configurable via `FEDREG_REGS_BASE_URL` and a
   per-`execute()` upstream-call budget (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`,
   default 30).
+- **regulations.gov rate guardrails** — to protect the shared api.data.gov key:
+  a process-wide hourly token bucket (`FEDREG_REGS_RATE_PER_HOUR`, default 1000;
+  in-memory, so it does not coordinate across replicas), a per-authenticated-subject
+  hourly quota in HTTP mode (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`, default 500), and
+  no-429-retry on `regs`. The GET response cache key now also incorporates a redacted
+  auth-context hash (no cross-key cache bleed), and the authenticated subject is bound
+  to its MCP session (a session id reused with a different token is rejected).
 
 ### Changed
 - **Per-source corpora** — the merged `schema/field-dictionary.json` is now
