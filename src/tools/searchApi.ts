@@ -11,7 +11,7 @@ export type SearchApiInputT = z.infer<typeof SearchApiInput>;
 export interface SearchHit {
   id: string;
   kind: 'endpoint' | 'field';
-  binding: 'fr' | 'ecfr';
+  binding: string;
   description: string;
   signature?: string;
   example?: string;

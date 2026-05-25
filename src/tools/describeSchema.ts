@@ -17,7 +17,7 @@ export type DescribeSchemaResult =
       entries: Array<{
         id: string;
         kind: 'endpoint' | 'field';
-        binding: 'fr' | 'ecfr';
+        binding: string;
         description: string;
         signature?: string;
         example?: string;

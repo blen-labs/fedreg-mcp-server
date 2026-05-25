@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export interface CorpusEntry {
   id: string;          // e.g. 'fr.documents.search' or 'fr.documents.publication_date'
   kind: 'endpoint' | 'field';
-  binding: 'fr' | 'ecfr';
+  binding: string;     // source name: 'fr' | 'ecfr' | 'regs' | …
   description: string;
   example?: string;
   signature?: string;
