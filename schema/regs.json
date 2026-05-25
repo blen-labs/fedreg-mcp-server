@@ -53,13 +53,13 @@
       "kind": "endpoint",
       "binding": "regs",
       "signature": "(cross-source recipe)",
-      "description": "Recipe: find public comments on a specific Federal Register rule. Use fr.documents.search to locate the rule and read its document number, then regs.documents.search by frDocNum to get the regulations.gov document and its objectId, then regs.comments.search filtered by commentOnId = that objectId.",
+      "description": "Recipe: find public comments on a specific Federal Register rule. Use fr.documents.search to locate the rule and read its document number, then regs.documents.search with filter[searchTerm] = that document number (frDocNum is a returned attribute, NOT a filter) to get the regulations.gov document and its objectId, then regs.comments.search filtered by commentOnId = that objectId.",
       "example": "const fr1 = await fr.documents.search({ conditions: { term: 'methane', type: ['RULE'] }, per_page: 1, order: 'newest' }); const docNum = fr1.results[0].document_number; const rd = await regs.documents.search({ filter: { searchTerm: docNum } }); const objectId = rd.data[0].attributes.objectId; const comments = await regs.comments.search({ filter: { commentOnId: objectId }, page: { size: 250 } });"
     }
   ],
   "fields": [
     { "id": "regs.documents.objectId", "kind": "field", "binding": "regs", "description": "Internal regulations.gov id of a document; pass as filter[commentOnId] to regs.comments.search to fetch its comments." },
-    { "id": "regs.documents.frDocNum", "kind": "field", "binding": "regs", "description": "Federal Register document number; bridges a regulations.gov document to fr.documents." },
+    { "id": "regs.documents.frDocNum", "kind": "field", "binding": "regs", "description": "Federal Register document number; a RETURNED attribute, not a filterable field. To find a regs document for a known FR document number, use filter[searchTerm] = that number. Bridges a regs document to fr.documents." },
     { "id": "regs.documents.commentEndDate", "kind": "field", "binding": "regs", "description": "When the public comment period closes (regulations.gov view)." },
     { "id": "regs.documents.openForComment", "kind": "field", "binding": "regs", "description": "Boolean: whether the document is currently open for public comment." },
     { "id": "regs.meta.totalElements", "kind": "field", "binding": "regs", "description": "Total matching records for a search; read from the JSON:API meta object to drive pagination." }
