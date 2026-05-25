@@ -1,0 +1,67 @@
+{
+  "endpoints": [
+    {
+      "id": "regs.documents.search",
+      "kind": "endpoint",
+      "binding": "regs",
+      "signature": "regs.documents.search(params)",
+      "description": "Search regulations.gov documents (rules, proposed rules, notices, supporting & related material). The regulations.gov view adds docket linkage, live comment-period status (openForComment, commentEndDate), and the objectId needed to fetch comments. For canonical Federal Register rule text/metadata since 1994, prefer fr.documents; use this when you need comments or docket context. Filters: filter[searchTerm], filter[agencyId], filter[docketId], filter[documentType], filter[postedDate][ge|le], filter[lastModifiedDate][ge|le]. JSON:API response (data/included/meta.totalElements).",
+      "example": "await regs.documents.search({ filter: { searchTerm: 'methane', postedDate: { ge: '2024-01-01' } }, sort: '-postedDate', page: { size: 250 } })"
+    },
+    {
+      "id": "regs.documents.get",
+      "kind": "endpoint",
+      "binding": "regs",
+      "signature": "regs.documents.get(documentId, { include?: 'attachments' })",
+      "description": "Fetch one regulations.gov document by its documentId. Read objectId from data.attributes to then query comments via regs.comments.search({ filter: { commentOnId } }).",
+      "example": "await regs.documents.get('EPA-HQ-OAR-2021-0317-0001', { include: 'attachments' })"
+    },
+    {
+      "id": "regs.comments.search",
+      "kind": "endpoint",
+      "binding": "regs",
+      "signature": "regs.comments.search(params)",
+      "description": "Search public comments submitted to regulations.gov. The unique value over Federal Register / eCFR. Filter by filter[commentOnId] (the document's objectId), filter[searchTerm], filter[agencyId], filter[postedDate][ge|le], filter[lastModifiedDate][ge|le]. Results cap at ~5000 per query (page[size] max 250); page past it with the lastModifiedDate cursor (sort by lastModifiedDate, then re-query with filter[lastModifiedDate][ge] = last seen value).",
+      "example": "await regs.comments.search({ filter: { commentOnId: '0900006481b...' }, sort: 'lastModifiedDate', page: { size: 250 } })"
+    },
+    {
+      "id": "regs.comments.get",
+      "kind": "endpoint",
+      "binding": "regs",
+      "signature": "regs.comments.get(commentId, { include?: 'attachments' })",
+      "description": "Fetch one public comment (full text + optional attachments). Some submitter fields are never public (email, phone, address).",
+      "example": "await regs.comments.get('EPA-HQ-OAR-2021-0317-0123', { include: 'attachments' })"
+    },
+    {
+      "id": "regs.dockets.search",
+      "kind": "endpoint",
+      "binding": "regs",
+      "signature": "regs.dockets.search(params)",
+      "description": "Search regulations.gov dockets (the folder grouping a rulemaking's documents and comments). Filter by filter[searchTerm], filter[agencyId] (comma-separated), filter[lastModifiedDate][ge|le]. Sort by title or -title.",
+      "example": "await regs.dockets.search({ filter: { agencyId: 'EPA', searchTerm: 'greenhouse gas' } })"
+    },
+    {
+      "id": "regs.dockets.get",
+      "kind": "endpoint",
+      "binding": "regs",
+      "signature": "regs.dockets.get(docketId)",
+      "description": "Fetch one docket by its docketId, including its comment-period metadata and counts.",
+      "example": "await regs.dockets.get('EPA-HQ-OAR-2021-0317')"
+    },
+    {
+      "id": "regs.recipes.comments-on-a-rule",
+      "kind": "endpoint",
+      "binding": "regs",
+      "signature": "(cross-source recipe)",
+      "description": "Recipe: find public comments on a specific Federal Register rule. Use fr.documents.search to locate the rule and read its document number, then regs.documents.search by frDocNum to get the regulations.gov document and its objectId, then regs.comments.search filtered by commentOnId = that objectId.",
+      "example": "const fr1 = await fr.documents.search({ conditions: { term: 'methane', type: ['RULE'] }, per_page: 1, order: 'newest' }); const docNum = fr1.results[0].document_number; const rd = await regs.documents.search({ filter: { searchTerm: docNum } }); const objectId = rd.data[0].attributes.objectId; const comments = await regs.comments.search({ filter: { commentOnId: objectId }, page: { size: 250 } });"
+    }
+  ],
+  "fields": [
+    { "id": "regs.documents.objectId", "kind": "field", "binding": "regs", "description": "Internal regulations.gov id of a document; pass as filter[commentOnId] to regs.comments.search to fetch its comments." },
+    { "id": "regs.documents.frDocNum", "kind": "field", "binding": "regs", "description": "Federal Register document number; bridges a regulations.gov document to fr.documents." },
+    { "id": "regs.documents.commentEndDate", "kind": "field", "binding": "regs", "description": "When the public comment period closes (regulations.gov view)." },
+    { "id": "regs.documents.openForComment", "kind": "field", "binding": "regs", "description": "Boolean: whether the document is currently open for public comment." },
+    { "id": "regs.meta.totalElements", "kind": "field", "binding": "regs", "description": "Total matching records for a search; read from the JSON:API meta object to drive pagination." }
+  ]
+}

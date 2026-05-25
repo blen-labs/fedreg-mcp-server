@@ -51,3 +51,16 @@ describe('validateSourceNames', () => {
     expect(() => validateSourceNames([{ name: 'fr' }, { name: 'ecfr' }, { name: 'regs' }])).not.toThrow();
   });
 });
+
+describe('regs source enable/disable', () => {
+  it('is disabled without an API key, with an actionable reason', () => {
+    const regs = getSources(cfg()).find(s => s.name === 'regs')!;
+    expect(regs.enabled).toBe(false);
+    expect(regs.disabledReason).toMatch(/FEDREG_REGS_API_KEY/);
+  });
+  it('is enabled when a key is provided, and never leaks it', () => {
+    const regs = getSources(cfg({ regsApiKey: 'SECRET-KEY' })).find(s => s.name === 'regs')!;
+    expect(regs.enabled).toBe(true);
+    expect(JSON.stringify(regs)).not.toContain('SECRET-KEY');
+  });
+});

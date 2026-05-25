@@ -14,7 +14,7 @@ function cfg() {
 describe('buildSdk + dispatch', () => {
   it('exposes enabled clients and registered names', () => {
     const sdk = buildSdk(cfg());
-    expect(sdk.registeredNames).toEqual(['fr', 'ecfr']);
+    expect(sdk.registeredNames).toEqual(['fr', 'ecfr', 'regs']);
     expect(Object.keys(sdk.clients).sort()).toEqual(['ecfr', 'fr']);
     expect(sdk.meta.find(m => m.name === 'fr')?.enabled).toBe(true);
   });

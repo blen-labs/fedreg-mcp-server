@@ -1,6 +1,7 @@
 import { BANNED_GLOBALS } from '../../sandbox/policy.js';
 import { createFrSource } from './fr.js';
 import { createEcfrSource } from './ecfr.js';
+import { createRegsSource } from './regs.js';
 import type { Source, SourceConfig } from './source.js';
 
 export type { Source, SourceMeta, SourceConfig } from './source.js';
@@ -20,7 +21,7 @@ export function validateSourceNames(sources: { name: string }[]): void {
 }
 
 export function getSources(cfg: SourceConfig): Source[] {
-  const sources: Source[] = [createFrSource(cfg), createEcfrSource(cfg)];
+  const sources: Source[] = [createFrSource(cfg), createEcfrSource(cfg), createRegsSource(cfg)];
   validateSourceNames(sources);
   return sources;
 }
