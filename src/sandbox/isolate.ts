@@ -71,6 +71,8 @@ export class IsolateRunner implements SandboxRunner {
       return new ivm.ExternalCopy(result).copyInto();
     };
 
+    // Safe to interpolate: binding names are pre-validated as JS identifiers by
+    // getSources() (src/sdk/sources/index.ts). Do NOT interpolate unvalidated strings here.
     const namesLiteral = JSON.stringify(opts.bindings ?? []);
     await context.evalClosure(
       `function makeProxy(binding, rpc) {

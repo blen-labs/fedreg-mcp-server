@@ -116,6 +116,9 @@ function writeFrame(stream: NodeJS.WritableStream, obj: unknown): void {
   stream.write(len + '\n' + payload);
 }
 
+// `bindings` is interpolated into the generated source via JSON.stringify; it is safe
+// only because names are pre-validated as JS identifiers by getSources()
+// (src/sdk/sources/index.ts). Do NOT pass unvalidated strings here.
 export function buildDenoRunner(userCode: string, timeoutMs: number, bindings: string[]): string {
   // Runs inside deno. Talks to host over stdin/stdout with the same framing.
   return `
