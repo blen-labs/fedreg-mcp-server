@@ -16,6 +16,7 @@ export interface SupervisorConfig {
   cacheTtlMs: number;
   cacheMaxItems: number;
   sandbox: SandboxKind;
+  regsMaxCallsPerExecute: number;
 }
 
 export async function buildSupervisor(cfg: SupervisorConfig): Promise<CatalogDeps> {
@@ -28,5 +29,5 @@ export async function buildSupervisor(cfg: SupervisorConfig): Promise<CatalogDep
   const sdk = buildSdk(sourceCfg);
   const corpus = buildCorpus(sources);
   const sandbox = await pickSandbox(cfg.sandbox);
-  return { sdk, sandbox, corpus };
+  return { sdk, sandbox, corpus, regsMaxCallsPerExecute: cfg.regsMaxCallsPerExecute };
 }

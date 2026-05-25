@@ -36,7 +36,7 @@ beforeAll(async () => {
     frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
     regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
   }));
-  const deps: CatalogDeps = { sdk, sandbox, corpus };
+  const deps: CatalogDeps = { sdk, sandbox, corpus, regsMaxCallsPerExecute: 30 };
   handle = await startHttp(deps, {
     host: '127.0.0.1',
     port: 0,
@@ -211,7 +211,7 @@ describe('Auth enforcement', () => {
       frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
       regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
     }));
-    secured = await startHttp({ sdk, sandbox, corpus }, {
+    secured = await startHttp({ sdk, sandbox, corpus, regsMaxCallsPerExecute: 30 }, {
       host: '127.0.0.1', port: 0,
       rps: 1000, burst: 1000, maxSessions: 100, subjectDailyQuota: 1_000_000,
       insecure: false,

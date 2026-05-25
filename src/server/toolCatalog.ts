@@ -17,6 +17,7 @@ export interface CatalogDeps {
   sdk: Sdk;
   sandbox: SandboxRunner;
   corpus: Corpus;
+  regsMaxCallsPerExecute: number;
 }
 
 export function buildCatalog(deps: CatalogDeps): ToolDescriptor[] {
