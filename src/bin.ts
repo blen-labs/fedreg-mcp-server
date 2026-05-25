@@ -63,7 +63,10 @@ async function main(): Promise<void> {
     cacheTtlMs: Number(process.env.FEDREG_CACHE_TTL_MS ?? 300_000),
     cacheMaxItems: Number(process.env.FEDREG_CACHE_MAX_ITEMS ?? 2000),
     sandbox: args.sandbox,
-    regsMaxCallsPerExecute: Number(process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE ?? 30),
+    regsMaxCallsPerExecute: (() => {
+      const n = Number(process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE ?? 30);
+      return Number.isFinite(n) && n >= 0 ? n : 30;
+    })(),
   });
 
   let handle: HttpHandle | undefined;
