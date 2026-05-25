@@ -21,18 +21,20 @@ export interface CatalogDeps {
 }
 
 export function buildCatalog(deps: CatalogDeps): ToolDescriptor[] {
+  const names = deps.sdk.registeredNames.join(', ');
+  const namespaces = deps.sdk.registeredNames.map(n => `${n}.*`).join(', ');
   return [
     {
       name: 'search_api',
       description:
-        'BM25 search over Federal Register and eCFR API endpoints and the curated field dictionary. Returns TypeScript signatures and examples for use in execute.',
+        `BM25 search over the API endpoints and curated field dictionary for all bound sources (${names}). Returns TypeScript signatures and examples for use in execute.`,
       inputSchema: zodToJsonSchema(SearchApiInput),
       handler: async (args) => searchApi(SearchApiInput.parse(args), deps.corpus),
     },
     {
       name: 'describe_schema',
       description:
-        'Look up an endpoint or field by exact dotted id (path) or by namespace prefix. Use to drill into fr.* and ecfr.* surfaces.',
+        `Look up an endpoint or field by exact dotted id (path) or by namespace prefix. Use to drill into the bound source surfaces (${namespaces}).`,
       inputSchema: zodToJsonSchema(DescribeSchemaInput),
       handler: async (args) => describeSchema(DescribeSchemaInput.parse(args), deps.corpus.entries),
     },
