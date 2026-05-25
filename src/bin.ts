@@ -74,6 +74,7 @@ async function main(): Promise<void> {
       return Number.isFinite(n) && n >= 1 ? n : 1000;
     })(),
     regsSubjectRatePerHour: (() => {
+      // Require >= 1; per-subject hourly cap, not "unlimited".
       const n = Number(process.env.FEDREG_REGS_SUBJECT_RATE_PER_HOUR ?? 500);
       return Number.isFinite(n) && n >= 1 ? n : 500;
     })(),

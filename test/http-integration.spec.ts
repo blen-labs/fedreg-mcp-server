@@ -233,4 +233,19 @@ describe('Auth enforcement', () => {
     expect(r.status).toBe(401);
     expect(r.headers.get('www-authenticate') ?? '').toMatch(/resource_metadata=/);
   });
+
+  // Session-subject binding: a session opened by subject A must reject follow-up requests
+  // that reuse its session id under subject B (403 session_subject_mismatch). This guards
+  // per-subject regs quota integrity (see src/server/http.ts).
+  //
+  // Skipped: the public startHttp/AuthConfig harness cannot mint two DISTINCT subjects.
+  // Both 'none' and 'embedded' providers use NoopVerifier, which always returns subject
+  // 'anonymous' regardless of the bearer token; the OIDC providers require a live JWKS
+  // endpoint (createRemoteJWKSet) that this in-process harness does not stand up. Exercising
+  // a real mismatch would require injecting a custom multi-subject verifier that the current
+  // public surface does not expose, so the enforcement is verified by code review instead.
+  it.skip('rejects reuse of a session id under a different subject (403)', async () => {
+    // Would: initialize as subject A, then POST to the same mcp-session-id with subject B's
+    // token and assert status 403 + body.error === 'session_subject_mismatch'.
+  });
 });
