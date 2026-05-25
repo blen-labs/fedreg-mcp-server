@@ -11,10 +11,11 @@ to do before sending anything non-trivial, and we'll figure it out together.
   out of scope.** That includes adding `fetch`, `import`, filesystem, env,
   or subprocess access to the sandbox surface.
 - New SDK methods are welcome but must be paired with field/endpoint entries
-  in `schema/field-dictionary.json` so `search_api` and `describe_schema` can
-  surface them.
-- Public API shape (the three tools, the `fr.*` / `ecfr.*` globals) is
-  stable; breaking changes need a major version bump and a migration note.
+  in the corpus so `search_api` and `describe_schema` can surface them. Each
+  source owns its own file — `schema/{fr,ecfr,regs}.json` — so add the entry to
+  the file for the source you're touching.
+- Public API shape (the three tools, the `fr.*` / `ecfr.*` / `regs.*` globals)
+  is stable; breaking changes need a major version bump and a migration note.
 
 ## Development
 
@@ -51,7 +52,7 @@ keep it green and add to it for new HTTP-visible behavior.
 - An "embedded" auth provider that mints/verifies short-lived HS256 tokens
   end-to-end with a documented dev flow.
 - Schema entries for the few Federal Register fields not yet in
-  `schema/field-dictionary.json`.
+  `schema/fr.json`.
 
 ## Releasing
 

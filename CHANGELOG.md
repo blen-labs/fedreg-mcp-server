@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **regulations.gov source** — a third SDK binding, `regs.*`
+  (`documents`, `comments`, `dockets`, each with `search` / `get`), exposing
+  public comments, dockets, and live comment-period status. Requires a free
+  API key (`FEDREG_REGS_API_KEY`); the key is held host-side and never reaches
+  the sandbox. Without it, `regs` is disabled (`SourceUnavailable`) while `fr`
+  and `ecfr` keep working. Configurable via `FEDREG_REGS_BASE_URL` and a
+  per-`execute()` upstream-call budget (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`,
+  default 30).
+
+### Changed
+- **Per-source corpora** — the merged `schema/field-dictionary.json` is now
+  split into per-source files (`schema/{fr,ecfr,regs}.json`), each loaded by
+  its own `Source` via a registry (`getSources`).
+
 ## [1.0.0] - 2026-05-20
 
 Initial public release.

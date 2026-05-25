@@ -1,8 +1,13 @@
 # SDK reference
 
-Inside `execute`, two globals are available — `fr` for FederalRegister.gov v1
-and `ecfr` for the Electronic Code of Federal Regulations. Both return plain
-JSON; all methods are `async` and resolve with the upstream payload.
+Inside `execute`, up to three globals are available — `fr` for
+FederalRegister.gov v1, `ecfr` for the Electronic Code of Federal Regulations,
+and `regs` for regulations.gov v4. All return plain JSON; every method is
+`async` and resolves with the upstream payload.
+
+> `regs` is injected only when `FEDREG_REGS_API_KEY` is set. Without a key the
+> source is disabled and `regs.*` calls return a `SourceUnavailable` error;
+> `fr` and `ecfr` are unaffected.
 
 You can always discover the full surface from inside the model:
 
@@ -91,6 +96,58 @@ to scope the response.
 | `counts_hierarchy(opts)` | Result counts grouped by CFR hierarchy. |
 | `counts_titles(opts)` | Result counts grouped by title. |
 | `suggestions(opts)` | Did-you-mean suggestions. |
+
+## `regs.*` — regulations.gov v4
+
+The unique value over `fr` / `ecfr`: public **comments**, **dockets**, and
+live comment-period status. regulations.gov documents overlap `fr.documents`,
+so prefer `fr.documents` for canonical Federal Register text/metadata since
+1994 and reach for `regs` when you need comments or docket context.
+
+Responses are raw [JSON:API](https://jsonapi.org/) payloads:
+`{ data, included?, meta }`, with `meta.totalElements` carrying the total
+match count. Each `search` takes a single params object:
+
+```ts
+{
+  filter?: Record<string, string | number | boolean | { ge?: string; le?: string }>,
+  sort?: string,          // e.g. 'lastModifiedDate' or '-postedDate'
+  page?: { number?: number; size?: number },  // size max 250
+}
+```
+
+A scalar `filter` value becomes `filter[key]=value`; a `{ ge, le }` value
+becomes `filter[key][ge]` / `filter[key][le]` (date-range bounds). `get`
+methods take an id and, for documents/comments, an optional
+`{ include: 'attachments' }`.
+
+### `regs.documents`
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `search(params)` | JSON:API `{ data, included?, meta }` | Filters: `searchTerm`, `agencyId`, `docketId`, `documentType`, `postedDate: { ge, le }`, `lastModifiedDate: { ge, le }`. Each result's `attributes.objectId` is what `regs.comments` filters on; `attributes.frDocNum` is the Federal Register document number (a *returned* attribute, not a filter — bridge from a known FR doc number via `filter: { searchTerm: docNumber }`). |
+| `get(documentId, { include? })` | JSON:API `{ data, included? }` | One document by id (e.g. `'EPA-HQ-OAR-2021-0317-0001'`). `include: 'attachments'` adds attachment resources. |
+
+### `regs.comments`
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `search(params)` | JSON:API `{ data, included?, meta }` | The unique value vs `fr`/`ecfr`. Filters: `commentOnId` (a document's `objectId`), `searchTerm`, `agencyId`, `postedDate: { ge, le }`, `lastModifiedDate: { ge, le }`. |
+| `get(commentId, { include? })` | JSON:API `{ data, included? }` | One comment's full text (+ attachments with `include`). Some submitter fields (email, phone, address) are never public. |
+
+### `regs.dockets`
+
+| Method | Returns | Notes |
+|--------|---------|-------|
+| `search(params)` | JSON:API `{ data, included?, meta }` | The folder grouping a rulemaking's documents and comments. Filters: `searchTerm`, `agencyId` (comma-separated), `lastModifiedDate: { ge, le }`. Sort by `title` / `-title`. |
+| `get(docketId)` | JSON:API `{ data, included? }` | One docket, incl. comment-period metadata and counts. |
+
+### Pagination past 5000 results
+
+regulations.gov caps any single query at ~5000 results (`page[size]` max 250,
+so ~20 pages). To read further, page with the `lastModifiedDate` cursor: sort
+by `lastModifiedDate`, walk the pages, then re-query with
+`filter: { lastModifiedDate: { ge: <last value seen> } }` and continue.
 
 ## Errors
 

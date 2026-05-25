@@ -11,6 +11,7 @@ Supervisor  (SDK + Sandbox + Quota)
     ↓
 SDK bindings  fr.*  (FederalRegister.gov v1)
               ecfr.* (Electronic Code of Federal Regulations)
+              regs.* (regulations.gov v4)
     ↓
 HttpClient  (undici + LRU cache + retry-with-backoff)
     ↓
@@ -22,24 +23,60 @@ Cloudflare popularized and that `clinicaltrials-mcp-server` uses:
 
 | Tool              | Purpose |
 |-------------------|---------|
-| `search_api`      | BM25 over the merged endpoint + field dictionary |
+| `search_api`      | BM25 over the per-source endpoint + field corpora |
 | `describe_schema` | Exact path lookup or namespace enumeration (`prefix`) |
-| `execute`         | Run TypeScript in a sandbox against `fr.*` / `ecfr.*` |
+| `execute`         | Run TypeScript in a sandbox against `fr.*` / `ecfr.*` / `regs.*` |
 
 ## SDK bindings
 
-Two sibling globals are injected into the sandbox:
+Up to three sibling globals are injected into the sandbox:
 
 - **`fr.*`** — FederalRegister.gov v1: `documents`, `publicInspection`,
   `agencies`, `issues`, `suggestedSearches`, `images`.
 - **`ecfr.*`** — eCFR: `titles`, `admin.agencies`, `structure`, `ancestry`,
   `versions`, `full`, `search.{results, counts_*, suggestions}`.
+- **`regs.*`** — regulations.gov v4: `documents`, `comments`, `dockets`, each
+  with `search()` / `get()`. Responses are raw JSON:API
+  (`{ data, included?, meta }`). This is the only source for public comments,
+  dockets, and live comment-period status.
 
 The bindings are implemented in TypeScript on the host
-(`src/sdk/{fr,ecfr}-client.ts`) and exposed inside the sandbox as Proxy
+(`src/sdk/{fr,ecfr,regs}-client.ts`) and exposed inside the sandbox as Proxy
 objects that RPC back to the host. The host translates each RPC call into
 a parameterized HTTP request, threading through retry, LRU caching, and a
 configurable user agent.
+
+### Source registry
+
+Each binding is produced by a `Source` factory under `src/sdk/sources/`
+(`fr.ts`, `ecfr.ts`, `regs.ts`); `getSources(cfg)` (`src/sdk/sources/index.ts`)
+assembles the list, validates that each name is a safe JS identifier that does
+not collide with a sandbox global, and hands the set to the supervisor and the
+sandbox global injector. Adding a source is one factory plus one line here —
+the tools, sandbox injection, and dispatch are all registry-driven.
+
+A `Source` reports `enabled` / `disabledReason`. The dispatcher
+(`src/sdk/runtime.ts`) injects only enabled sources; a call to a disabled
+source returns a `SourceUnavailable` error carrying its `disabledReason`,
+so one missing dependency never takes the others down.
+
+### regulations.gov: key handling and degradation
+
+regulations.gov requires a free API key (`FEDREG_REGS_API_KEY`). It is held
+**host-side** inside the `regs` `HttpClient` (sent as the `X-Api-Key` default
+header) and **never reaches the sandbox** — sandboxed code cannot read or
+exfiltrate it. Without the key, the `regs` source is **disabled**: `regs.*`
+calls return `SourceUnavailable` while `fr` and `ecfr` keep working
+(graceful degradation).
+
+Two rate guardrails protect the upstream quota:
+
+- **No-429-retry** — the `regs` `HttpClient` is built with `retry429: false`,
+  so a `429` surfaces immediately as `RateLimited` instead of being retried
+  (retrying a quota error only burns more of the budget).
+- **Per-execute budget** — at most `FEDREG_REGS_MAX_CALLS_PER_EXECUTE`
+  (default `30`) regulations.gov upstream calls per single `execute()` run;
+  exceeding it fails the call rather than fanning out unbounded requests.
 
 The full surface lives in [`docs/sdk-reference.md`](./sdk-reference.md).
 
@@ -118,15 +155,17 @@ src/
   index.ts                 # library exports
   server/                  # MCP server, transports, authz, rate limiting
   tools/                   # the three tools
-  sdk/                     # fr/ecfr clients + sandbox-visible types
+  sdk/                     # fr/ecfr/regs clients + sources registry + types
   sandbox/                 # isolate + deno runners, AST preflight
   search/                  # BM25 + corpus loader
   auth/                    # auth re-exports + embedded HS256 dev minter
   supervisor/              # builds SDK + picks sandbox
   util/                    # http client, logger, quotas
 schema/
-  field-dictionary.json    # merged endpoint + field corpus
-test/                      # vitest specs (5 files, 27 tests)
+  fr.json                  # Federal Register endpoint + field corpus
+  ecfr.json                # eCFR endpoint + field corpus
+  regs.json                # regulations.gov endpoint + field corpus
+test/                      # vitest specs
 examples/                  # snippets you can paste into `execute`
 deploy/                    # Dockerfile, railway.toml, RAILWAY.md
 docs/                      # this file + sdk-reference.md
