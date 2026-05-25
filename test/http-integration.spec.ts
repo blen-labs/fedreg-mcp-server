@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MockAgent } from 'undici';
 import { startHttp, type HttpHandle } from '../src/server/http.js';
 import { buildSdk } from '../src/sdk/bindings.js';
+import { getSources } from '../src/sdk/sources/index.js';
+import { buildCorpus } from '../src/search/corpus.js';
 import { pickSandbox } from '../src/sandbox/index.js';
 import type { CatalogDeps } from '../src/server/toolCatalog.js';
 
@@ -30,7 +32,11 @@ beforeAll(async () => {
     dispatcher: mockAgent,
   });
   const sandbox = await pickSandbox('auto');
-  const deps: CatalogDeps = { sdk, sandbox };
+  const corpus = buildCorpus(getSources({
+    frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+    regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
+  }));
+  const deps: CatalogDeps = { sdk, sandbox, corpus };
   handle = await startHttp(deps, {
     host: '127.0.0.1',
     port: 0,
@@ -201,7 +207,11 @@ describe('Auth enforcement', () => {
       userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
     });
     const sandbox = await pickSandbox('auto');
-    secured = await startHttp({ sdk, sandbox }, {
+    const corpus = buildCorpus(getSources({
+      frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+      regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
+    }));
+    secured = await startHttp({ sdk, sandbox, corpus }, {
       host: '127.0.0.1', port: 0,
       rps: 1000, burst: 1000, maxSessions: 100, subjectDailyQuota: 1_000_000,
       insecure: false,
