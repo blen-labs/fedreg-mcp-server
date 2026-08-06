@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing (OIDC) + provenance
     steps:
       # Pin to the tag release-please just created; on the dispatch path the
       # output is empty and checkout falls back to the dispatched ref (main).
@@ -56,12 +56,15 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
       - uses: pnpm/action-setup@v4
+      # No registry-url here on purpose: setup-node's generated .npmrc would
+      # reference ${NODE_AUTH_TOKEN}, which no longer exists — publishing
+      # authenticates via npm Trusted Publishing (OIDC), configured on the
+      # npm package settings for this repo + release.yml.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-          registry-url: https://registry.npmjs.org
       # isolated-vm needs python + a C++ toolchain to compile
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
       - uses: denoland/setup-deno@v2
@@ -76,7 +79,7 @@ jobs:
       # comes from prepack, and a missing dist would otherwise ship an empty,
       # unrunnable package.
       - run: test -f dist/bin.js && test -f dist/index.js && test -f dist/index.d.ts
+      # Tokenless: pnpm detects the Actions OIDC context and exchanges it for
+      # a short-lived npm credential; provenance is generated automatically
+      # for trusted-publisher publishes.
       - run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'

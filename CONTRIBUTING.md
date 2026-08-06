@@ -81,14 +81,16 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
    creates no tag and no GitHub Release, and fails with a 403 if that version
    is already on npm — use it only for a version that was tagged by hand.
 
-Setup requirements: an `NPM_TOKEN` repository secret with publish rights to
-`@blen/fedreg-mcp-server` (Settings → Secrets and variables → Actions), and —
-recommended — a `RELEASE_PLEASE_TOKEN` secret (fine-grained PAT or GitHub App
-token with contents + pull-requests write): without it the Release PR is
-raised by `GITHUB_TOKEN` and gets **no CI checks**, which deadlocks against
-required status checks. Provenance additionally requires the repo to be
-public, `id-token: write` on the publish job, and `repository.url` in
-`package.json` matching the repo the workflow runs in. The `files` field in
+Setup requirements: publishing is **tokenless** via [npm Trusted
+Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC) — the npm
+package settings register this repo's `release.yml` as a trusted publisher,
+so no `NPM_TOKEN` secret exists or is needed; the job's `id-token: write`
+permission is what authenticates. Recommended: a `RELEASE_PLEASE_TOKEN`
+secret (fine-grained PAT or GitHub App token with contents + pull-requests
+write) — without it the Release PR is raised by `GITHUB_TOKEN` and gets
+**no CI checks**, which deadlocks against required status checks.
+Provenance is generated automatically for trusted-publisher publishes
+(public repo + `id-token: write`). The `files` field in
 `package.json` ships only `dist/`, `schema/`, `README.md`, `LICENSE`,
 `NOTICE`, `CHANGELOG.md`, and `SECURITY.md`.
 
