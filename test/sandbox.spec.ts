@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { preflight } from '../src/sandbox/policy.js';
-import { buildDenoRunner } from '../src/sandbox/deno.js';
+import { buildDenoRunner, DenoRunner } from '../src/sandbox/deno.js';
 import { IsolateRunner } from '../src/sandbox/isolate.js';
 
 describe('sandbox policy preflight', () => {
@@ -45,5 +45,23 @@ describe('dynamic binding injection', () => {
     const res = await runner.execute({ code: 'return (typeof fr) + "," + (await fr.documents.search());', bindings: ['fr', 'ecfr'] }, bridge);
     expect(res.ok).toBe(true);
     expect(res.value).toBe('function,OK');
+  });
+
+  it('deno runner executes code and proxies bindings (gated on availability)', async () => {
+    const runner = new DenoRunner();
+    if (!(await runner.available())) return; // skip where deno is not on PATH
+    const bridge = { dispatch: async () => ({ ok: true, value: 'OK' }) };
+    const res = await runner.execute({ code: 'return (typeof fr) + "," + (await fr.documents.search());', bindings: ['fr', 'ecfr'] }, bridge);
+    expect(res.ok).toBe(true);
+    expect(res.value).toBe('function,OK');
+  });
+
+  it('deno runner rejects banned globals via preflight (gated on availability)', async () => {
+    const runner = new DenoRunner();
+    if (!(await runner.available())) return; // skip where deno is not on PATH
+    const bridge = { dispatch: async () => ({ ok: true, value: 'OK' }) };
+    const res = await runner.execute({ code: 'return process.env;', bindings: ['fr'] }, bridge);
+    expect(res.ok).toBe(false);
+    expect(res.error?.name).toBe('PolicyError');
   });
 });

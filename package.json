@@ -55,7 +55,7 @@
   },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && chmod +x dist/bin.js || true",
+    "build": "tsc -p tsconfig.build.json && (chmod +x dist/bin.js || true)",
     "dev": "tsx src/bin.ts",
     "start": "node dist/bin.js",
     "test": "vitest run",

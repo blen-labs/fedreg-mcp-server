@@ -12,7 +12,7 @@
 
 **Ask your AI assistant real questions about U.S. federal regulations — and get answers grounded in the official Federal Register, eCFR, and regulations.gov.**
 
-This is a [Model Context Protocol](https://modelcontextprotocol.io) server that connects any MCP client (Claude Desktop, and others) to three official U.S. government sources:
+This is a [Model Context Protocol](https://modelcontextprotocol.io) server that connects any MCP client (Claude Desktop and others) to three official U.S. government sources:
 
 - **[Federal Register](https://www.federalregister.gov)** — the daily journal of the federal government: rules, proposed rules, notices, and presidential documents since 1994.
 - **[Electronic Code of Federal Regulations (eCFR)](https://www.ecfr.gov)** — the current, continuously updated text of the Code of Federal Regulations.
@@ -49,9 +49,9 @@ const rules = await fr.documents.search({
 
 ## Features
 
-- **Three official sources, one server** — the full Federal Register v1 (`fr.*`), eCFR (`ecfr.*`), and regulations.gov v4 (`regs.*`) APIs behind one tool.
+- **Three official sources, one server** — the full Federal Register v1 (`fr.*`), eCFR (`ecfr.*`), and regulations.gov v4 (`regs.*`) APIs behind one server.
 - **Code mode, not tool sprawl** — the model writes TypeScript against typed `fr` / `ecfr` / `regs` SDKs instead of juggling dozens of single-purpose tools.
-- **Safe by construction** — user code runs in an `isolated-vm` (or Deno) sandbox with **no network, filesystem, env, or subprocess access**. The only way out is the three upstream government APIs.
+- **Safe by construction** — user code runs in an `isolated-vm` (or Deno) sandbox with **no network, filesystem, env, or subprocess access**. The only way out is to the three upstream government APIs.
 - **Runs anywhere MCP does** — stdio for Claude Desktop, or a remote Streamable HTTP server with OAuth, rate limiting, and quotas.
 - **Discovery built in** — `search_api` and `describe_schema` help the model (and you) find the right call fast.
 
@@ -71,7 +71,7 @@ regulations.gov requires a free API key from [api.data.gov / open.gsa.gov](https
 
 Without a key the `regs` source is **disabled** — `regs.*` calls return a clear `SourceUnavailable` error, while `fr` and `ecfr` keep working normally.
 
-Because the regulations.gov key is shared, `regs` upstream calls are bounded by a process-wide hourly bucket (`FEDREG_REGS_RATE_PER_HOUR`), a per-subject hourly quota in HTTP auth mode (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`), and a per-`execute()` call budget (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`). For the two hourly rates, `0` is **not** "unlimited" — it blocks all regs calls; to disable regs entirely, leave `FEDREG_REGS_API_KEY` unset.
+Because the regulations.gov key is shared, `regs` upstream calls are bounded by a process-wide hourly bucket (`FEDREG_REGS_RATE_PER_HOUR`), a per-subject hourly quota in HTTP mode (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`; under `--insecure` all callers share the single `anonymous` bucket, and stdio skips it), and a per-`execute()` call budget (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`). For the two hourly rates, `0` is **not** "unlimited" — it blocks all regs calls; to disable regs entirely, leave `FEDREG_REGS_API_KEY` unset.
 
 ### Bridge example: comments on a Federal Register rule
 
@@ -128,7 +128,7 @@ Three tools, in the order the model uses them:
 |---|---|
 | `search_api(query, k?)` | Finds the right endpoint/field via BM25 over the SDK docs. Returns ready-to-run TypeScript snippets. |
 | `describe_schema({ path? \| prefix? })` | Looks up an exact call or lists a whole namespace. |
-| `execute({ code, timeoutMs?, memoryMb? })` | Runs TypeScript in the sandbox, with `fr`, `ecfr`, and `regs` as globals. (`regs` is injected only when `FEDREG_REGS_API_KEY` is set; otherwise `regs.*` calls return `SourceUnavailable`.) |
+| `execute({ code, timeoutMs?, memoryMb? })` | Runs TypeScript in the sandbox, with `fr`, `ecfr`, and `regs` as globals. (`regs` is always defined; without `FEDREG_REGS_API_KEY` its calls return a `SourceUnavailable` error rather than a `ReferenceError`.) |
 
 A request flows from the MCP client through `execute` into the sandbox; the `fr.*` / `ecfr.*` / `regs.*` globals are thin proxies that marshal each call across a host-side RPC bridge to the real APIs:
 
@@ -153,8 +153,8 @@ Full SDK surface: [`docs/sdk-reference.md`](./docs/sdk-reference.md) · Architec
 Run a shared, authenticated endpoint over Streamable HTTP:
 
 ```bash
-# Dev only — no auth:
-npx @blen/fedreg-mcp-server --http --insecure --port 8080
+# Dev only — no auth, loopback-bound:
+npx @blen/fedreg-mcp-server --http --insecure --host 127.0.0.1 --port 8080
 
 # Production — auth via any OIDC issuer:
 FEDREG_AUTH_PROVIDER=clerk \
@@ -171,7 +171,7 @@ Then point any MCP client at it:
 { "mcpServers": { "fedreg": { "type": "http", "url": "https://your-host.example.com/mcp" } } }
 ```
 
-The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id`, so requests can be load-balanced across replicas without sticky routing. Pre-2026 clients are still served through a stateless legacy fallback. It adds OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting, per-subject daily quotas, and Host-header allowlisting. A one-command Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the bundled [`Dockerfile`](./deploy/Dockerfile) precompiles `isolated-vm` and slims to a ~220 MB `node:22-bookworm-slim` runtime.
+The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id`, so requests can be load-balanced across replicas without sticky routing. Pre-2026 clients are still served through a stateless legacy fallback. It adds OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting, per-subject daily quotas, and Host-header allowlisting. A step-by-step Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the bundled [`Dockerfile`](./deploy/Dockerfile) precompiles `isolated-vm` and slims to a ~220 MB `node:22-bookworm-slim` runtime.
 
 ### Configuration
 
@@ -185,7 +185,7 @@ The most common knobs (full list and defaults in [`.env.example`](./.env.example
 | `FEDREG_REGS_BASE_URL` | `https://api.regulations.gov` | regulations.gov v4 API base URL. |
 | `FEDREG_REGS_MAX_CALLS_PER_EXECUTE` | `30` | Caps regulations.gov upstream calls per `execute()` run (rate-limit guardrail). |
 | `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide cap on regs upstream calls/hour (protects the shared key). In-memory; with N replicas, divide by N. Must be ≥ 1. |
-| `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-authenticated-subject regs calls/hour (HTTP auth mode only). Must be ≥ 1. |
+| `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-subject regs calls/hour (HTTP mode only; skipped on stdio; one shared `anonymous` bucket under `--insecure`). Must be ≥ 1. |
 | `FEDREG_AUTH_PROVIDER` | `none` | `none` / `embedded` / `generic-oidc` / `clerk` / `workos` / `auth0` |
 | `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (used in OAuth metadata). |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |
@@ -194,7 +194,7 @@ CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--ins
 
 ## Security
 
-User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a wall-clock timeout, and a heap cap. The full threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new) rather than a public issue.
+User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a wall-clock timeout, and — on the `isolated-vm` runner — a heap cap (`memoryMb` is not enforceable on the Deno fallback). The full threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new) rather than a public issue.
 
 ## Contributing
 

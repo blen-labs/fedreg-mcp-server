@@ -55,8 +55,10 @@ not collide with a sandbox global, and hands the set to the supervisor and the
 sandbox global injector. Adding a source is one factory plus one line here —
 the tools, sandbox injection, and dispatch are all registry-driven.
 
-A `Source` reports `enabled` / `disabledReason`. The dispatcher
-(`src/sdk/runtime.ts`) injects only enabled sources; a call to a disabled
+A `Source` reports `enabled` / `disabledReason`. All registered sources are
+injected as sandbox globals (so a disabled source never throws a
+`ReferenceError`); the dispatcher (`src/sdk/runtime.ts`) resolves calls only
+for enabled sources — a call to a disabled
 source returns a `SourceUnavailable` error carrying its `disabledReason`,
 so one missing dependency never takes the others down.
 
@@ -85,10 +87,11 @@ Four layered rate guardrails protect the shared upstream quota:
   are free. **It is in-memory / single-process and does NOT coordinate across
   replicas:** N replicas allow up to N× the configured rate against the shared
   key, so divide the rate by replica count or use per-replica keys.
-- **Per-subject hourly quota** — in HTTP auth mode only,
-  `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` (default `500`/hr) per authenticated
-  subject (over the limit returns `RegsSubjectQuotaExceeded`). Skipped in stdio
-  (no subject). The subject is re-derived from the caller's bearer token on
+- **Per-subject hourly quota** — HTTP mode only (skipped in stdio, which has
+  no subject), `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` (default `500`/hr) per
+  subject (over the limit returns `RegsSubjectQuotaExceeded`). Under
+  `--insecure` every caller shares the single `anonymous` subject and
+  therefore one bucket. The subject is re-derived from the caller's bearer token on
   every request, so quota is always attributed to the tenant that actually
   presented credentials for that call.
 
@@ -103,9 +106,10 @@ Two runners are supported:
 
 - **`isolate`** — `isolated-vm` (V8 isolate). First choice on Linux / macOS /
   Windows on x64 / arm64.
-- **`deno`** — `deno run --no-prompt -` subprocess with **no `--allow-*`
-  flags**. Fallback when `isolated-vm` is unavailable (e.g. Alpine, some
-  ARM targets).
+- **`deno`** — a `deno run --no-prompt <runner-file>` subprocess with **no
+  `--allow-*` flags** (the runner is written to a temp file so stdin stays
+  free for the host RPC channel). Fallback when `isolated-vm` is unavailable
+  (e.g. Alpine, some ARM targets).
 
 Both runners enforce:
 
@@ -160,7 +164,7 @@ Bearer authentication is gated by `FEDREG_AUTH_PROVIDER`:
 | Provider | How tokens are verified |
 |----------|-------------------------|
 | `none`   | No verification. Combine with `--insecure` (HTTP only). |
-| `embedded` | HS256 with a shared secret. DEV ONLY. |
+| `embedded` | **No verification.** Any bearer token is accepted as subject `anonymous`, same as `none`. DEV ONLY — never expose this to a network. |
 | `generic-oidc` | JWKS via `jose` against `FEDREG_AUTH_JWKS_URL`. |
 | `clerk`, `workos`, `auth0` | Preset issuer/JWKS shapes for the named provider. |
 
@@ -202,7 +206,7 @@ src/
   sdk/                     # fr/ecfr/regs clients + sources registry + types
   sandbox/                 # isolate + deno runners, AST preflight
   search/                  # BM25 + corpus loader
-  auth/                    # auth re-exports + embedded HS256 dev minter
+  auth/                    # auth re-exports (embedded dev minter is unused)
   supervisor/              # builds SDK + picks sandbox
   util/                    # http client, logger, quotas
 schema/

@@ -7,7 +7,7 @@ to do before sending anything non-trivial, and we'll figure it out together.
 ## Ground rules
 
 - The server's whole reason for existing is to be a safe place to run untrusted
-  TypeScript against two public APIs. **Anything that weakens the sandbox is
+  TypeScript against three public APIs. **Anything that weakens the sandbox is
   out of scope.** That includes adding `fetch`, `import`, filesystem, env,
   or subprocess access to the sandbox surface.
 - New SDK methods are welcome but must be paired with field/endpoint entries
@@ -73,13 +73,24 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
    `x-release-please-version` lines in `src/server/mcpServer.ts` and
    `src/sdk/bindings.ts`) and drafts the CHANGELOG section.
 3. **Merging the Release PR** creates the `vX.Y.Z` tag and GitHub Release, and
-   triggers the publish job: full gates (typecheck, lint, test) and then
-   `pnpm publish --access public` with npm provenance.
+   triggers the publish job: full gates (typecheck, lint, test, build +
+   artifact check) and then `pnpm publish --access public` with npm
+   provenance.
+4. **Bootstrap / recovery**: `gh workflow run release.yml --ref main` runs the
+   publish job alone against `main`'s current `package.json` version. It
+   creates no tag and no GitHub Release, and fails with a 403 if that version
+   is already on npm — use it only for a version that was tagged by hand.
 
-Setup requirement: an `NPM_TOKEN` repository secret with publish rights to
-`@blen/fedreg-mcp-server` (Settings → Secrets and variables → Actions). The
-`files` field in `package.json` ships only `dist/`, `schema/`, `README.md`,
-`LICENSE`, `NOTICE`, `CHANGELOG.md`, and `SECURITY.md`.
+Setup requirements: an `NPM_TOKEN` repository secret with publish rights to
+`@blen/fedreg-mcp-server` (Settings → Secrets and variables → Actions), and —
+recommended — a `RELEASE_PLEASE_TOKEN` secret (fine-grained PAT or GitHub App
+token with contents + pull-requests write): without it the Release PR is
+raised by `GITHUB_TOKEN` and gets **no CI checks**, which deadlocks against
+required status checks. Provenance additionally requires the repo to be
+public, `id-token: write` on the publish job, and `repository.url` in
+`package.json` matching the repo the workflow runs in. The `files` field in
+`package.json` ships only `dist/`, `schema/`, `README.md`, `LICENSE`,
+`NOTICE`, `CHANGELOG.md`, and `SECURITY.md`.
 
 Breaking changes additionally need a migration note (see
 `docs/migration-v2.md` for the pattern).

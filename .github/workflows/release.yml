@@ -24,24 +24,37 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      # With the default GITHUB_TOKEN, the Release PR triggers no CI runs
+      # (GitHub suppresses workflows for GITHUB_TOKEN-raised events). Set the
+      # optional RELEASE_PLEASE_TOKEN secret (fine-grained PAT or GitHub App
+      # token with contents + pull-requests write) so Release PRs get checks.
       - uses: googleapis/release-please-action@v4
         id: release
         with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
   publish:
     needs: release-please
     # Publish when release-please just cut a release, or on manual dispatch
-    # (bootstrap / recovery). `always()` lets the dispatch path run even though
-    # the release-please job was skipped.
-    if: always() && (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
+    # from main (bootstrap / recovery). `!cancelled()` (not `always()`) lets
+    # the dispatch path run despite the skipped release-please job while still
+    # honoring a cancel of an in-flight run.
+    if: >-
+      !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write # npm provenance
     steps:
+      # Pin to the tag release-please just created; on the dispatch path the
+      # output is empty and checkout falls back to the dispatched ref (main).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -58,6 +71,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm build
+      # Prove the artifact exists before publishing — the tarball's dist/ only
+      # comes from prepack, and a missing dist would otherwise ship an empty,
+      # unrunnable package.
+      - run: test -f dist/bin.js && test -f dist/index.js && test -f dist/index.d.ts
       - run: pnpm publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

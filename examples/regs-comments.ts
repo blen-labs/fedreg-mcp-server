@@ -4,7 +4,7 @@
 // The fr → regs bridge: find a Federal Register rule, then pull the public
 // comments filed on it. Note that `frDocNum` is a *returned* attribute on
 // regulations.gov documents, NOT a filter — you bridge via filter.searchTerm
-// and then comment on the document's objectId.
+// and then query comments with filter.commentOnId set to the document's objectId.
 declare const fr: any;
 declare const regs: any;
 

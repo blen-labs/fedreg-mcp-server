@@ -35,7 +35,8 @@ In scope:
   the configured ceiling.
 
 Out of scope (please file a normal issue instead):
-- Upstream API rate limits (those are FederalRegister.gov / eCFR limits).
+- Upstream API rate limits (those are FederalRegister.gov / eCFR /
+  regulations.gov limits; see the `FEDREG_REGS_*` guardrails in the README).
 - Denial of service via lawful but expensive queries (we accept this risk
   on a per-tenant basis; tune `FEDREG_SUBJECT_DAILY_QUOTA` and
   `FEDREG_IP_RPS`).

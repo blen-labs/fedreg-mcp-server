@@ -2,7 +2,7 @@
  * Example: search Federal Register documents about methane published in 2024 by EPA.
  *
  * This snippet is what an MCP client would pass to the `execute` tool. The sandbox
- * gives you `fr` and `ecfr` as globals; no imports, no fetch, no environment.
+ * gives you `fr`, `ecfr`, and `regs` as globals; no imports, no fetch, no environment.
  */
 declare const fr: any;
 

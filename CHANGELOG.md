@@ -26,8 +26,9 @@ steps.
 - **Per-subject quota attribution no longer depends on a session.** The
   authenticated subject is re-derived from the caller's bearer token on every
   request and passed to the tool catalog for that request only. This replaces
-  the 2025-era session-subject binding (and its `403 session_subject_mismatch`
-  guard), which existed to stop one tenant reusing another's session id to spend
+  the 2025-era session-subject binding (and the `403 session_subject_mismatch`
+  guard added on `main` after v1.0.0, which never shipped in a release). The
+  binding existed to stop one tenant reusing another's session id to spend
   or pollute their quota — an attack with no carrier now that no session id
   exists.
 - **Tool arguments are now validated against the advertised JSON Schema.**
@@ -47,9 +48,10 @@ steps.
 ### Added
 - `server/discover` — advertises supported protocol versions, capabilities, and
   server identity on demand, replacing what the handshake used to carry.
-- `Mcp-Method` / `Mcp-Name` routing headers are required on the MCP endpoint and
-  validated against the request body; a mismatch is rejected with `-32020`
-  (`HeaderMismatch`).
+- On modern (`2026-07-28`) requests the `Mcp-Method` routing header is
+  required — plus `Mcp-Name` for `tools/call` — and is validated against the
+  request body; a missing or disagreeing header is rejected with `-32020`
+  (`HeaderMismatch`). Legacy requests are unaffected.
 - `tools/list` and `server/discover` results carry `ttlMs` (300 s) and
   `cacheScope: "public"`. The catalog derives only from process configuration,
   never from the caller, so it is identical for every tenant and safe to share.

@@ -91,7 +91,7 @@ to scope the response.
 
 | Method | Returns |
 |--------|---------|
-| `results(opts)` | Search results across the eCFR. `opts.query`, `opts.agency_slugs`, `opts.title`, `opts.last_modified_after/before`, `opts.date`, `opts.per_page`, `opts.page`. |
+| `results(opts)` | Search results across the eCFR. `opts.query`, `opts.agency_slugs`, `opts.hierarchy` (`{ title, subtitle, chapter, subchapter, part, subpart, section, appendix }`), `opts.last_modified_after/before`, `opts.date`, `opts.per_page`, `opts.page`, `opts.order` (`relevance` \| `hierarchy` \| `newest` \| `oldest`). |
 | `counts_daily(opts)` | Result counts grouped by day. |
 | `counts_hierarchy(opts)` | Result counts grouped by CFR hierarchy. |
 | `counts_titles(opts)` | Result counts grouped by title. |
@@ -155,13 +155,19 @@ The SDK throws (and the proxy re-throws inside the sandbox) named errors:
 
 - `HttpError` — non-2xx upstream response. `message` includes method, URL,
   and status code.
-- `ValidationError` — a parameter failed local validation before sending.
 - `TimeoutError` — the upstream call exceeded `FEDREG_UPSTREAM_TIMEOUT_MS`.
+- `SourceUnavailable` — the source is registered but disabled (e.g. `regs.*`
+  without `FEDREG_REGS_API_KEY`).
+- `RateLimited` / `RegsRateLimited` — an upstream 429 (never retried for
+  `regs`) / the process-wide hourly regs bucket ran dry.
+- `RegsCallBudgetExceeded` — the per-`execute()` regs call budget
+  (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`) ran out.
+- `RegsSubjectQuotaExceeded` — the per-subject hourly regs quota ran out.
 
-Inside `execute` the result of a thrown error is captured by `execute`'s
-own `{ ok: false, error: { name, message, stack } }` envelope, so a thrown
-`HttpError` will surface to the MCP client as an `isError: false` tool result
-that contains the structured error JSON.
+Inside `execute` a thrown error is captured by `execute`'s own
+`{ ok: false, error: { name, message, stack } }` envelope and surfaces to
+the MCP client as a normal tool result (no `isError` field) whose text block
+contains that structured error JSON — inspect `ok`, not `isError`.
 
 ## Style guidelines for sandboxed code
 

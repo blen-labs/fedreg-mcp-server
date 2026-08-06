@@ -12,3 +12,4 @@ You may obtain a copy of the License at
 This product fetches data from public U.S. government APIs:
   - FederalRegister.gov API v1 (U.S. Government Publishing Office / National Archives)
   - Electronic Code of Federal Regulations (eCFR) API
+  - Regulations.gov API v4 (U.S. General Services Administration / api.data.gov)

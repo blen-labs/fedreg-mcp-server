@@ -9,7 +9,7 @@ tightens tool-argument validation. The three-tool surface and the
 
 | You are… | Impact |
 |---|---|
-| A **stdio** user (Claude Desktop, MCPB) | Nothing changes. Tools, arguments, and results are the same. |
+| A **stdio** user (Claude Desktop) | Transport and protocol changes don't apply. **But client-visible changes 3 and 4 below do** — unknown tool names now return JSON-RPC `-32602`, and unknown argument keys are rejected with `isError: true`. Everything else is the same. |
 | An **HTTP client on a pre-2026 MCP SDK** | Keeps working. `initialize` is answered by a per-request stateless fallback. Note the removals below. |
 | An **HTTP client on MCP SDK v2** (`@modelcontextprotocol/client@2`) | Pass `versionNegotiation: { mode: 'auto' }` (or `{ mode: { pin: '2026-07-28' } }`) to speak the modern protocol. |
 | A **server operator** | Two env-var changes and one behavioral note — see below. |

@@ -17,7 +17,7 @@ if (existsSync(resolve(root, 'README.md'))) {
 const manifest = {
   manifest_version: '0.1',
   name: 'fedreg-mcp-server',
-  display_name: 'Federal Register & eCFR (Code Mode)',
+  display_name: 'Federal Register, eCFR & regulations.gov (Code Mode)',
   version: JSON.parse(await import('node:fs').then(fs => fs.promises.readFile(resolve(root, 'package.json'), 'utf8'))).version,
   description: 'Code-mode MCP server exposing FederalRegister.gov, eCFR, and regulations.gov APIs via fr.*, ecfr.*, and regs.* SDK bindings.',
   entry_point: 'dist/bin.js',

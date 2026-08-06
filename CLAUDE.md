@@ -17,14 +17,14 @@ pnpm test                               # vitest run (all 12 spec files, ~1s, no
 pnpm test test/search.spec.ts           # single file (args forward to vitest, no -- needed)
 pnpm test test/search.spec.ts -t "bm25" # single test by name (pair with file path to keep it fast)
 pnpm lint                               # eslint . — minimal config (unused-vars only); passing means little
-pnpm build                              # tsc -p tsconfig.build.json && chmod +x dist/bin.js || true
+pnpm build                              # tsc -p tsconfig.build.json && (chmod +x dist/bin.js || true)
 pnpm dev                                # tsx src/bin.ts (stdio)
 pnpm dev --http                         # HTTP transport; also --port, --host, --sandbox, --insecure
 ```
 
-- **`pnpm build` exits 0 even when compilation fails** (the script ends in `|| true`). Never treat a green build as proof it compiled — `pnpm typecheck` is the real gate.
+- In `pnpm build`, the `|| true` guards only the `chmod` — a `tsc` failure DOES fail the build. `pnpm typecheck` remains the broader gate (it also covers `test/**`, which the build config excludes).
 - CI (`.github/workflows/ci.yml`) runs `typecheck`, `lint`, `test`, `build` in that order on Node 20 and 22, plus a Docker build. All four must pass; the PR template also requires them as checkboxes.
-- A green `pnpm test` does NOT prove the sandbox works: sandbox-execution tests are gated on `await runner.available()` and silently no-op when no runner is present. CI compiles isolated-vm (Ubuntu + build tools); Deno is untested in CI.
+- A green `pnpm test` on a machine with NO sandbox runner does not prove the sandbox works: sandbox-execution tests are gated on `await runner.available()` and silently no-op when no runner is present. CI compiles isolated-vm AND installs Deno, so both runners' gated tests execute there.
 
 ### Environment notes
 
@@ -85,12 +85,12 @@ stdio | Streamable HTTP (+OAuth, per-IP bucket, quotas)     src/server/{stdio,ht
 
 - `LATEST_PROTOCOL_VERSION` / `SUPPORTED_PROTOCOL_VERSIONS` exported by the v2 SDK are the **legacy-era** vocabulary (`2025-11-25` and older) kept for the backward-compat leg — they are NOT the revision this server speaks, and reading them as an era signal is the documented way to wrongly conclude v2 lacks 2026-07-28 support (upstream PR #2585). The modern value lives in the SDK's `core-internal` as `FIRST_MODERN_PROTOCOL_VERSION` but is not exported, so use `MCP_PROTOCOL_VERSION` from `src/server/mcpServer.ts`; a test pins `/health` to it.
 
-- `.env.example` documents `FEDREG_EXEC_TIMEOUT_MS`/`FEDREG_EXEC_MEMORY_MB`, and `deploy/Dockerfile` sets `FEDREG_TRANSPORT` — all three are read nowhere. Execute limits are per-call Zod defaults in `src/tools/execute.ts`; transport is chosen only by the `--http` flag.
+- Execute limits (`timeoutMs`, `memoryMb`) are per-call Zod defaults on the `execute` tool in `src/tools/execute.ts` — they are NOT env-configurable; don't invent `FEDREG_EXEC_*` vars. Transport is chosen only by the `--http` flag, never by env.
 - The mcpb packaging pipeline is currently broken end-to-end: `scripts/mcpb-prepare.mjs` writes an obsolete DXT-0.1-shaped manifest that `@anthropic-ai/mcpb` rejects (`author`/`server` required), bare `pnpm mcpb:pack` targets the repo root (no manifest there → it stalls on an interactive init prompt), and the prepared bundle contains no `node_modules`, so its runtime deps wouldn't resolve anyway. Fixing it means rewriting the manifest literal in the script, staging production deps into `mcpb-build/`, then `pnpm build && pnpm mcpb:prepare && pnpm mcpb:pack mcpb-build`.
-- `dist/` is never cleaned between builds — delete it manually after renaming/moving source files. Never edit `dist/` or `mcpb-build/` (both gitignored artifacts; `mcpb-build/` on disk is stale).
+- `dist/` is never cleaned between builds — delete it manually after renaming/moving source files. Never edit `dist/` or `mcpb-build/` (both are gitignored build artifacts; `mcpb-build/` is only produced locally by `pnpm mcpb:prepare`, which wipes and regenerates it).
 - `buildSupervisor` instantiates the sources twice (once directly, once inside `buildSdk`), so HttpClients/LRU caches exist in duplicate; the corpus comes from the first set, dispatch uses the second. Know this before refactoring wiring or reasoning about cache memory.
 - Version strings live in three places (package.json, `src/server/mcpServer.ts`, `src/sdk/bindings.ts` `version()`). Releases are automated: release-please bumps all three (the two source lines carry `x-release-please-version` annotations — don't remove them) from Conventional Commit messages, so commit types (`feat:`/`fix:`/`!`) determine the next version. See CONTRIBUTING "Releasing".
 
 ## Docs
 
-`docs/architecture.md` (layered design, guardrails rationale) and `docs/sdk-reference.md` (full `fr`/`ecfr`/`regs` method surface + query patterns like the FR→regs `objectId` bridge) are the deep references. `docs/superpowers/{specs,plans}/` hold the regulations.gov design spec and implementation plan — their status lines predate implementation; trust git history over doc status labels.
+`docs/architecture.md` (layered design, guardrails rationale), `docs/sdk-reference.md` (full `fr`/`ecfr`/`regs` method surface + query patterns like the FR→regs `objectId` bridge), and `docs/migration-v2.md` (v1→v2 breaking changes) are the deep references.

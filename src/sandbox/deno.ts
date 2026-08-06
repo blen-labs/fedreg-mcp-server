@@ -6,8 +6,9 @@ import type { ExecuteOptions, ExecuteResult, RpcBridge, SandboxRunner } from './
 import { preflight } from './policy.js';
 
 /**
- * Deno fallback sandbox. We launch `deno run` with --no-net --no-read --no-write --no-env --no-ffi --no-prompt
- * and bridge RPC over stdin/stdout using a length-prefixed JSON protocol.
+ * Deno fallback sandbox. We launch `deno run --no-prompt <runner>` with NO
+ * `--allow-*` flags, so Deno's deny-by-default grants no net/fs/env/ffi/subprocess
+ * access, and bridge RPC over stdin/stdout using a length-prefixed JSON protocol.
  */
 export class DenoRunner implements SandboxRunner {
   kind = 'deno' as const;

@@ -41,8 +41,7 @@ ENV NODE_ENV=production \
     PORT=8080 \
     HOST=0.0.0.0 \
     FEDREG_LOG_LEVEL=info \
-    FEDREG_SANDBOX=auto \
-    FEDREG_TRANSPORT=http
+    FEDREG_SANDBOX=auto
 
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules

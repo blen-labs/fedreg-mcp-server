@@ -2,8 +2,8 @@
 
 Each file here is a snippet you can paste into the `execute` tool. They're
 written as standalone TypeScript so editors can syntax-check them; the
-`declare const fr: any` / `declare const ecfr: any` lines exist only to keep
-the type checker happy outside the sandbox.
+`declare const fr: any` / `declare const ecfr: any` / `declare const regs: any`
+lines exist only to keep the type checker happy outside the sandbox.
 
 | File | Demonstrates |
 |------|--------------|
