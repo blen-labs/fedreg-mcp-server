@@ -90,6 +90,9 @@ jobs:
         # Node 22 bundles npm 10 (no OIDC -> ENEEDAUTH), and pnpm's own OIDC
         # path has known regressions (pnpm/pnpm#11513), so upgrade npm and
         # publish with it. prepack (pnpm run build) still runs under npm.
+        # The version is PINNED: this job holds OIDC publish rights, and an
+        # unpinned npm@latest would let a compromised npm release run with
+        # publishing power. Bump deliberately.
         run: |
-          npm install -g npm@latest
+          npm install -g npm@12.0.2
           npm publish --access public
