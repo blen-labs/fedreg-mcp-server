@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Origin validation on `/mcp`** (a spec MUST previously unimplemented, and
+  unchanged since 1.x): browser-originated cross-site requests are rejected
+  with `403 origin_not_allowed` unless the `Origin` is the server's own, a
+  loopback origin, or listed in the new `FEDREG_ALLOWED_ORIGINS`
+  (comma-separated exact origins). Requests without an `Origin` header —
+  every non-browser MCP client — are unaffected.
+
+### Fixed
+- **MCPB packaging works again.** `scripts/mcpb-prepare.mjs` now emits a
+  schema-valid v0.1 manifest (`author` + `server.mcp_config`, replacing the
+  obsolete DXT-shaped top-level keys), stages hoisted production
+  `node_modules` into the bundle so it runs standalone, and validates the
+  manifest during prepare. `pnpm mcpb:pack` targets `mcpb-build/` and emits
+  `fedreg-mcp-server.mcpb`. Note: `isolated-vm` ships unbuilt, so `execute`
+  inside a bundle uses the Deno runner when available and reports
+  `SandboxUnavailable` otherwise.
+
 ## [2.0.0] - 2026-08-06
 
 **Breaking release.** The HTTP transport moves to the stateless MCP `2026-07-28`

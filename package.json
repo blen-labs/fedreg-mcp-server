@@ -64,7 +64,7 @@
     "typecheck": "tsc --noEmit",
     "prepack": "pnpm run build",
     "mcpb:prepare": "node scripts/mcpb-prepare.mjs",
-    "mcpb:pack": "mcpb pack"
+    "mcpb:pack": "mcpb pack mcpb-build fedreg-mcp-server.mcpb"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "2.0.0",
