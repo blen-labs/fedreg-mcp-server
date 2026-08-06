@@ -216,4 +216,4 @@ Contributions are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the
 
 BLEN, Inc is a digital services company that provides Emerging Technology (ML/AI, RPA), Digital Modernization (Legacy to Cloud), and Human-Centered Web/Mobile Design and Development.
 
-Built with ❤️ by [BLEN, Inc](https://www.blenlabs.com).
+Built by [BLEN, Inc](https://www.blenlabs.com).
