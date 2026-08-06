@@ -171,7 +171,7 @@ Then point any MCP client at it:
 { "mcpServers": { "fedreg": { "type": "http", "url": "https://your-host.example.com/mcp" } } }
 ```
 
-The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id`, so requests can be load-balanced across replicas without sticky routing. Pre-2026 clients are still served through a stateless legacy fallback. It adds OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting, per-subject daily quotas, and Host-header allowlisting. A step-by-step Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the bundled [`Dockerfile`](./deploy/Dockerfile) precompiles `isolated-vm` and slims to a ~220 MB `node:22-bookworm-slim` runtime.
+The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id`, so requests can be load-balanced across replicas without sticky routing. Pre-2026 clients are still served through a stateless legacy fallback. It adds OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting, per-subject daily quotas, Host-header allowlisting, and Origin validation on `/mcp` (browser cross-origin requests are rejected unless allowlisted via `FEDREG_ALLOWED_ORIGINS`; non-browser clients are unaffected). A step-by-step Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the bundled [`Dockerfile`](./deploy/Dockerfile) precompiles `isolated-vm` and slims to a ~220 MB `node:22-bookworm-slim` runtime.
 
 ### Configuration
 

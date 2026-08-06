@@ -352,3 +352,62 @@ describe('Auth enforcement', () => {
     expect(second.status).toBe(401);
   });
 });
+
+describe('Origin validation (MCP spec MUST — DNS rebinding / CSRF)', () => {
+  it('rejects a cross-origin browser request on /mcp with 403', async () => {
+    const r = await rpc('tools/list', {}, { headers: { origin: 'https://evil.example.com' } });
+    expect(r.status).toBe(403);
+    expect((r.body as { error?: string }).error).toBe('origin_not_allowed');
+  });
+
+  it('allows loopback origins by default (local web tooling)', async () => {
+    const r = await rpc('tools/list', {}, { headers: { origin: 'http://localhost:5173' } });
+    expect(r.status).toBe(200);
+  });
+
+  it('non-browser requests (no Origin header) are unaffected', async () => {
+    const r = await rpc('tools/list', {});
+    expect(r.status).toBe(200);
+  });
+
+  describe('with an explicit allowlist', () => {
+    let originHandle: HttpHandle;
+    let originBase: string;
+
+    beforeAll(async () => {
+      const sdk = buildSdk({
+        frBaseUrl: 'https://www.federalregister.gov/api/v1',
+        ecfrBaseUrl: 'https://www.ecfr.gov/api',
+        regsBaseUrl: 'https://api.regulations.gov',
+        userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
+      });
+      const sandbox = await pickSandbox('auto');
+      const corpus = buildCorpus(getSources({
+        frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+        regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
+      }));
+      originHandle = await startHttp({ sdk, sandbox, corpus, regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) }, {
+        host: '127.0.0.1', port: 0,
+        rps: 1000, burst: 1000, subjectDailyQuota: 1_000_000,
+        insecure: true,
+        auth: { provider: 'none' },
+        publicOrigin: 'http://127.0.0.1',
+        allowedOrigins: ['https://app.example.com'],
+      });
+      originBase = `http://127.0.0.1:${originHandle.port}`;
+    });
+
+    afterAll(async () => { await originHandle.close(); });
+
+    it('allows an allowlisted origin', async () => {
+      const r = await rpc('tools/list', {}, { target: originBase, headers: { origin: 'https://app.example.com' } });
+      expect(r.status).toBe(200);
+    });
+
+    it('still rejects origins outside the allowlist', async () => {
+      const r = await rpc('tools/list', {}, { target: originBase, headers: { origin: 'https://other.example.com' } });
+      expect(r.status).toBe(403);
+      expect((r.body as { error?: string }).error).toBe('origin_not_allowed');
+    });
+  });
+});

@@ -170,6 +170,10 @@ Bearer authentication is gated by `FEDREG_AUTH_PROVIDER`:
 
 The HTTP transport also enforces:
 
+- **Origin validation (spec MUST)** — browser-originated requests to `/mcp`
+  carry an `Origin` header and are rejected with 403 unless the origin is the
+  server's own, a loopback origin, or listed in `FEDREG_ALLOWED_ORIGINS`.
+  Requests without an `Origin` header (every non-browser MCP client) pass.
 - **DNS rebinding protection** — `FEDREG_ALLOWED_HOSTS` allowlist on the
   Host header.
 - **Per-IP rate limit** — token bucket with `FEDREG_IP_RPS` sustained rate

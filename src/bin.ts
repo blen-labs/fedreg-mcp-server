@@ -83,6 +83,9 @@ async function main(): Promise<void> {
   let handle: HttpHandle | undefined;
 
   if (args.http) {
+    const allowedOrigins = process.env.FEDREG_ALLOWED_ORIGINS
+      ? process.env.FEDREG_ALLOWED_ORIGINS.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+      : undefined;
     const allowedHosts = process.env.FEDREG_ALLOWED_HOSTS
       ? process.env.FEDREG_ALLOWED_HOSTS.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
       : undefined;
@@ -95,6 +98,7 @@ async function main(): Promise<void> {
       subjectDailyQuota: Number(process.env.FEDREG_SUBJECT_DAILY_QUOTA ?? 10_000),
       insecure: args.insecure,
       allowedHosts,
+      allowedOrigins,
       publicOrigin: process.env.FEDREG_PUBLIC_ORIGIN,
       auth: {
         provider: (process.env.FEDREG_AUTH_PROVIDER as AuthConfigProvider) ?? 'none',
