@@ -26,11 +26,10 @@ pnpm dev --http                         # HTTP transport; also --port, --host, -
 - CI (`.github/workflows/ci.yml`) runs `typecheck`, `lint`, `test`, `build` in that order on Node 20 and 22, plus a Docker build. All four must pass; the PR template also requires them as checkboxes.
 - A green `pnpm test` does NOT prove the sandbox works: sandbox-execution tests are gated on `await runner.available()` and silently no-op when no runner is present. CI compiles isolated-vm (Ubuntu + build tools); Deno is untested in CI.
 
-### This machine (local quirks)
+### Environment notes
 
-- Node here is v24, where the optional `isolated-vm` dependency fails to compile (harmless — install succeeds, `execute` falls back). Use the Deno sandbox instead; `deno` is NOT on PATH but lives at `~/.deno/bin/deno`:
-  `PATH="$HOME/.deno/bin:$PATH" pnpm dev --http --insecure --port 8090 --host 127.0.0.1 --sandbox deno`
-- Port 8080 is taken locally by nginx (80, 3000, 5000, 7000, 8000, 5432, 11434 are also occupied) — pick another, e.g. 8090.
+- On very new Node majors (e.g. 24), the optional `isolated-vm` dependency may fail to compile — harmless: install succeeds and `execute` falls back. Install [Deno](https://deno.com) and run with `--sandbox deno` (Deno must be on PATH; if installed to `~/.deno/bin`, prefix commands with `PATH="$HOME/.deno/bin:$PATH"`):
+  `pnpm dev --http --insecure --port 8090 --host 127.0.0.1 --sandbox deno`
 - Build-script approval for esbuild/isolated-vm lives in `pnpm-workspace.yaml` (`allowBuilds:`); don't move it to package.json and don't casually bump the pnpm major.
 
 ## Architecture
