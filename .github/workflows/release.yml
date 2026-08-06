@@ -40,15 +40,19 @@ jobs:
       contents: write # release commit, tag, GitHub Release
       id-token: write # npm trusted publishing (OIDC) + provenance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history + tags: the bump is computed from commits since the last tag
-      - uses: pnpm/action-setup@v4
+          # Explicit: the release step below pushes the chore(release) commit
+          # with these credentials; newer checkout majors changed the
+          # persistence default, so never rely on it.
+          persist-credentials: true
+      - uses: pnpm/action-setup@v6
       # No registry-url here on purpose: setup-node's generated .npmrc would
       # reference a NODE_AUTH_TOKEN env var that does not exist - publishing
       # authenticates via npm Trusted Publishing (OIDC), configured on the
       # npm package settings for this repo + release.yml.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: pnpm
