@@ -52,7 +52,6 @@ server skips bearer-token verification entirely.
 |---|---|
 | `FEDREG_IP_RPS` | `5` (token-bucket sustained rate per IP) |
 | `FEDREG_IP_BURST` | `20` (token-bucket burst per IP) |
-| `FEDREG_MAX_SESSIONS` | `500` |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` requests per authenticated subject per day |
 | `FEDREG_CACHE_TTL_MS` | `300000` (5 min upstream LRU) |
 | `FEDREG_UPSTREAM_TIMEOUT_MS` | `20000` |
@@ -67,15 +66,20 @@ curl -s "$URL/.well-known/oauth-protected-resource/mcp" | jq
 # 2) Health
 curl -s "$URL/health" | jq
 
-# 3) Initialize a session (unauthed gets 401 with WWW-Authenticate)
+# 3) List tools (unauthed gets 401 with WWW-Authenticate).
+#    MCP 2026-07-28 is stateless: no handshake, no session id to carry.
 curl -i -X POST "$URL/mcp" \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
+  -H 'mcp-protocol-version: 2026-07-28' \
+  -H 'mcp-method: tools/list' \
   -H "authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"curl","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}}}'
 ```
 
-Note the `mcp-session-id` response header — pass it back on subsequent calls.
+Every request is self-contained, so this same shape works against any replica.
+`Mcp-Method` (and `Mcp-Name` on `tools/call`) are required and must agree with
+the body — a mismatch is rejected with `-32020`.
 
 ## 6. Pointing Claude at it
 
@@ -100,4 +104,4 @@ sees a `401` with a `WWW-Authenticate` header pointing at your metadata URL.
 - The runtime image is `node:22-bookworm-slim` + `libstdc++`. No Python, no
   toolchain — about 220 MB.
 - `dumb-init` is the PID 1 so signals are forwarded cleanly. The server handles
-  `SIGTERM`/`SIGINT` and drains open MCP sessions before exit.
+  `SIGTERM`/`SIGINT`, aborts in-flight MCP exchanges, then closes the listener.

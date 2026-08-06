@@ -91,7 +91,8 @@ auth-layer protections and accept the resulting risk.
 
 ## Dependencies
 
-We track advisories on direct runtime dependencies — `@modelcontextprotocol/sdk`,
-`undici`, `jose`, `acorn`, `lru-cache`, `zod`, and the optional `isolated-vm`.
+We track advisories on direct runtime dependencies — `@modelcontextprotocol/server`,
+`@modelcontextprotocol/node`, `undici`, `jose`, `acorn`, `lru-cache`, `zod`, and the
+optional `isolated-vm`.
 For an advisory in any of these that affects this server, expect a patch
 release within the timeline above.

@@ -30,9 +30,15 @@ pnpm build         # tsc + chmod
 ```
 
 The HTTP integration test (`test/http-integration.spec.ts`) exercises a real
-`http.Server` against `StreamableHTTPServerTransport` over `fetch`, including
-sandbox → SDK → mocked upstream. That's the canonical end-to-end check; please
-keep it green and add to it for new HTTP-visible behavior.
+`http.Server` against the v2 SDK's `createMcpHandler`/`toNodeHandler` over `fetch`,
+covering both the stateless `2026-07-28` leg and the legacy `initialize` fallback,
+including sandbox → SDK → mocked upstream. That's the canonical end-to-end check;
+please keep it green and add to it for new HTTP-visible behavior.
+
+`test/official-client.spec.ts` drives the same server with the real
+`@modelcontextprotocol/client` SDK, which builds the `_meta` envelope and routing
+headers itself — keep it passing whenever you touch the transport, since hand-built
+requests cannot catch a protocol misunderstanding shared by both sides.
 
 ## Sandbox runners
 
@@ -56,10 +62,27 @@ keep it green and add to it for new HTTP-visible behavior.
 
 ## Releasing
 
-Maintainers tag and publish with `npm publish --access public`. The `files`
-field in `package.json` ships only `dist/`, `schema/`, `README.md`, `LICENSE`,
-`NOTICE`, `CHANGELOG.md`, and `SECURITY.md`. Pre-publish, `pnpm build && pnpm test`
-must pass on Node 20 and 22.
+Releases are automated with [release-please](https://github.com/googleapis/release-please)
+(`.github/workflows/release.yml`):
+
+1. Land changes on `main` using [Conventional Commits](https://www.conventionalcommits.org/)
+   (`feat:`, `fix:`, `docs:`, …; add `!` or a `BREAKING CHANGE:` footer for majors).
+   The commit types determine the next SemVer version.
+2. On every push to `main`, release-please opens or updates a **Release PR**
+   that bumps the version (in `package.json` and the annotated
+   `x-release-please-version` lines in `src/server/mcpServer.ts` and
+   `src/sdk/bindings.ts`) and drafts the CHANGELOG section.
+3. **Merging the Release PR** creates the `vX.Y.Z` tag and GitHub Release, and
+   triggers the publish job: full gates (typecheck, lint, test) and then
+   `pnpm publish --access public` with npm provenance.
+
+Setup requirement: an `NPM_TOKEN` repository secret with publish rights to
+`@blen/fedreg-mcp-server` (Settings → Secrets and variables → Actions). The
+`files` field in `package.json` ships only `dist/`, `schema/`, `README.md`,
+`LICENSE`, `NOTICE`, `CHANGELOG.md`, and `SECURITY.md`.
+
+Breaking changes additionally need a migration note (see
+`docs/migration-v2.md` for the pattern).
 
 ## Reporting security issues
 

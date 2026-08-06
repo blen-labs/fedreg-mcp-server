@@ -6,7 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-06
+
+**Breaking release.** The HTTP transport moves to the stateless MCP `2026-07-28`
+protocol and tool arguments are now strictly validated. Pre-2026 MCP clients
+keep working via a built-in legacy fallback. See the
+[v2 migration guide](docs/migration-v2.md) for client and operator upgrade
+steps.
+
+### Changed
+- **MCP protocol upgraded to `2026-07-28` (stateless core).** BREAKING for the
+  HTTP transport. The `initialize`/`initialized` handshake and the
+  `Mcp-Session-Id` header are gone; each request is self-contained, carrying its
+  protocol version, client info, and capabilities in `_meta`. Requests can now
+  be load-balanced across replicas with no sticky routing or shared session
+  store. Migrated from `@modelcontextprotocol/sdk@1.x` to the v2 SDK
+  (`@modelcontextprotocol/server` + `@modelcontextprotocol/node` `2.0.0`), which
+  is the release line implementing this revision.
+- **Per-subject quota attribution no longer depends on a session.** The
+  authenticated subject is re-derived from the caller's bearer token on every
+  request and passed to the tool catalog for that request only. This replaces
+  the 2025-era session-subject binding (and its `403 session_subject_mismatch`
+  guard), which existed to stop one tenant reusing another's session id to spend
+  or pollute their quota — an attack with no carrier now that no session id
+  exists.
+- **Tool arguments are now validated against the advertised JSON Schema.**
+  BREAKING for clients that sent extra argument keys. `registerTool` attaches the
+  SDK's validator, and the generated schemas set `additionalProperties: false`, so
+  an unrecognized key returns `isError: true` with `"Input validation error: …
+  must NOT have additional properties"`. Under `1.x` the schema was advertisement
+  only and Zod silently stripped unknown keys.
+- **An unknown tool name is now a JSON-RPC error, not a tool result.** It returns
+  `{"error":{"code":-32602,"message":"Tool X not found"}}` instead of the previous
+  `isError: true` content block, so clients must not read `result.isError` to
+  detect it.
+- **Per-source corpora** — the merged `schema/field-dictionary.json` is now
+  split into per-source files (`schema/{fr,ecfr,regs}.json`), each loaded by
+  its own `Source` via a registry (`getSources`).
+
 ### Added
+- `server/discover` — advertises supported protocol versions, capabilities, and
+  server identity on demand, replacing what the handshake used to carry.
+- `Mcp-Method` / `Mcp-Name` routing headers are required on the MCP endpoint and
+  validated against the request body; a mismatch is rejected with `-32020`
+  (`HeaderMismatch`).
+- `tools/list` and `server/discover` results carry `ttlMs` (300 s) and
+  `cacheScope: "public"`. The catalog derives only from process configuration,
+  never from the caller, so it is identical for every tenant and safe to share.
+- Backward compatibility for pre-2026 clients: requests without the `_meta`
+  envelope are classified as legacy and answered by a per-request stateless
+  `2025-11-25` fallback, so the `initialize` handshake keeps working. No session
+  is minted on either path.
+
 - **regulations.gov source** — a third SDK binding, `regs.*`
   (`documents`, `comments`, `dockets`, each with `search` / `get`), exposing
   public comments, dockets, and live comment-period status. Requires a free
@@ -20,13 +71,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in-memory, so it does not coordinate across replicas), a per-authenticated-subject
   hourly quota in HTTP mode (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`, default 500), and
   no-429-retry on `regs`. The GET response cache key now also incorporates a redacted
-  auth-context hash (no cross-key cache bleed), and the authenticated subject is bound
-  to its MCP session (a session id reused with a different token is rejected).
+  auth-context hash (no cross-key cache bleed), and the per-subject quota is keyed on
+  the subject the request's own bearer token verified as.
 
-### Changed
-- **Per-source corpora** — the merged `schema/field-dictionary.json` is now
-  split into per-source files (`schema/{fr,ecfr,regs}.json`), each loaded by
-  its own `Source` via a registry (`getSources`).
+### Removed
+- `FEDREG_MAX_SESSIONS` — there are no protocol sessions left to cap. An existing
+  deployment that still sets it is silently ignored rather than erroring.
+- `GET`/`DELETE` on `/mcp` (2025-era session operations) now return `405`.
+- `subscriptions/listen` is refused (`maxSubscriptions: 0`). This server declares
+  only the `tools` capability, but the SDK routes the method regardless and would
+  otherwise hold up to 1024 long-lived SSE streams per handler — the unbounded
+  long-lived state that `FEDREG_MAX_SESSIONS` used to cap.
 
 ## [1.0.0] - 2026-05-20
 
@@ -63,5 +118,6 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/blen-labs/fedreg-mcp-server/releases/tag/v1.0.0

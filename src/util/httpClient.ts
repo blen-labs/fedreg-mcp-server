@@ -40,7 +40,7 @@ export class HttpClient {
   constructor(opts: HttpClientOptions) {
     this.#defaultHeaders = opts.defaultHeaders ?? {};
     this.baseUrl = opts.baseUrl;
-    this.userAgent = opts.userAgent ?? 'fedreg-mcp-server/1.0 (+https://github.com/blen-labs/fedreg-mcp-server)';
+    this.userAgent = opts.userAgent ?? 'fedreg-mcp-server/2.0 (+https://github.com/blen-labs/fedreg-mcp-server)';
     this.timeoutMs = opts.timeoutMs ?? 20_000;
     this.retries = opts.retries ?? 3;
     this.retry429 = opts.retry429 ?? true;

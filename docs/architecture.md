@@ -80,7 +80,7 @@ Four layered rate guardrails protect the shared upstream quota:
   out unbounded requests.
 - **Process-wide token bucket** — a single in-memory bucket caps total `regs`
   upstream calls to `FEDREG_REGS_RATE_PER_HOUR` (default `1000`/hr) across all
-  sessions and tenants, protecting the shared api.data.gov key; over the limit
+  tenants, protecting the shared api.data.gov key; over the limit
   returns `RegsRateLimited`. It sits *after* the response cache, so cache hits
   are free. **It is in-memory / single-process and does NOT coordinate across
   replicas:** N replicas allow up to N× the configured rate against the shared
@@ -88,8 +88,9 @@ Four layered rate guardrails protect the shared upstream quota:
 - **Per-subject hourly quota** — in HTTP auth mode only,
   `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` (default `500`/hr) per authenticated
   subject (over the limit returns `RegsSubjectQuotaExceeded`). Skipped in stdio
-  (no subject). The subject is bound to the MCP session at init; reusing a
-  session id with a different token is rejected (403).
+  (no subject). The subject is re-derived from the caller's bearer token on
+  every request, so quota is always attributed to the tenant that actually
+  presented credentials for that call.
 
 For the two hourly rates, `0` is **not** "unlimited" — it blocks all regs
 calls; to disable the source, leave `FEDREG_REGS_API_KEY` unset.
@@ -124,15 +125,35 @@ If neither runner is available, `pickSandbox('auto')` returns an
 
 ## Streamable HTTP transport
 
+The server speaks MCP `2026-07-28`, whose protocol core is **stateless**: there
+is no `initialize`/`initialized` handshake and no `Mcp-Session-Id`. Every request
+is self-contained, carrying its protocol version, client info, and capabilities
+in `_meta`, so any request can be served by any replica with no sticky routing
+or shared session store.
+
 `--http` enables a Node `http.Server` that handles:
 
 - `GET /.well-known/oauth-protected-resource/mcp` — RFC 9728 metadata
   document (`resource`, `authorization_servers`, `bearer_methods_supported`,
   `scopes_supported`).
 - `GET /health` — liveness probe (used by Docker `HEALTHCHECK` and Railway).
-- `POST /mcp` and `GET /mcp` — MCP endpoint. POSTs without a session id
-  must be `initialize` requests; the response carries an
-  `mcp-session-id` header that subsequent requests pass back.
+- `POST /mcp` — the MCP endpoint. Each POST is one complete JSON-RPC request.
+  `MCP-Protocol-Version` and `Mcp-Method` are required, plus `Mcp-Name` for
+  `tools/call`; a header that disagrees with the body is rejected with
+  `-32020 HeaderMismatch`. `GET`/`DELETE` on this path return `405` (they were
+  2025-era session operations).
+- `server/discover` returns supported protocol versions, capabilities, and
+  server identity on demand, replacing what the handshake used to carry.
+
+`tools/list` and `server/discover` results carry `ttlMs` and `cacheScope`
+(`300000` / `public`) so clients and shared caches can hold them: the catalog is
+derived from process configuration, never from the caller, so it is identical
+for every tenant.
+
+Pre-2026 clients are still served: requests that arrive without the `_meta`
+envelope are classified as legacy and answered by a per-request stateless
+`2025-11-25` fallback, so the `initialize` handshake continues to work. No
+session is minted on either path.
 
 Bearer authentication is gated by `FEDREG_AUTH_PROVIDER`:
 
@@ -150,9 +171,14 @@ The HTTP transport also enforces:
 - **Per-IP rate limit** — token bucket with `FEDREG_IP_RPS` sustained rate
   and `FEDREG_IP_BURST` burst.
 - **Per-subject daily quota** — `FEDREG_SUBJECT_DAILY_QUOTA` requests per
-  authenticated subject per UTC day.
-- **Graceful drain on SIGTERM** — closes the listener and every open MCP
-  session before exiting.
+  authenticated subject per UTC day. Auth runs on every request (there is no
+  session in which an identity could persist), so both this quota and the
+  per-subject regs quota are keyed on the subject that request's own token
+  verified as.
+- **Graceful shutdown on SIGTERM** — the MCP handler is closed first (which
+  aborts in-flight exchanges and releases their sockets), then the listener.
+  The order matters: `server.close()` only resolves once every connection is
+  idle, so closing it first would hang behind an open exchange.
 
 ## Caching and retry
 

@@ -9,6 +9,7 @@ the type checker happy outside the sandbox.
 |------|--------------|
 | [`fr-search.ts`](./fr-search.ts) | Federal Register: structured `documents.search` with `conditions`, `fields`, ordering. |
 | [`ecfr-search.ts`](./ecfr-search.ts) | eCFR: `counts_hierarchy` + paginated `search.results` for one agency. |
+| [`regs-comments.ts`](./regs-comments.ts) | regulations.gov: the fr → regs bridge — find a rule, then pull its public comments via `objectId`. |
 
 ## Tips for sandboxed code
 
