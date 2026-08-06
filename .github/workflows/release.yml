@@ -86,4 +86,10 @@ jobs:
           gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "${NOTES_FILE}"
       - name: Publish to npm (trusted publishing)
         if: steps.cut.outputs.released == 'true' || inputs.republish
-        run: pnpm publish --access public --no-git-checks
+        # npm CLI >= 11.5.1 is the reference OIDC trusted-publishing client.
+        # Node 22 bundles npm 10 (no OIDC -> ENEEDAUTH), and pnpm's own OIDC
+        # path has known regressions (pnpm/pnpm#11513), so upgrade npm and
+        # publish with it. prepack (pnpm run build) still runs under npm.
+        run: |
+          npm install -g npm@latest
+          npm publish --access public
