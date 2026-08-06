@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 
+
+## [2.0.2] - 2026-08-06
+
+### Changed
+- publish with npm CLI >= 11.5 for OIDC trusted publishing
 ## [2.0.1] - 2026-08-06
 
 ### Fixed
@@ -149,7 +154,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/blen-labs/fedreg-mcp-server/releases/tag/v1.0.0
