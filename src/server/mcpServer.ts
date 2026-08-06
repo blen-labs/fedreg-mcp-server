@@ -41,7 +41,7 @@ function cachedInputSchema(name: string, jsonSchema: unknown): ReturnType<typeof
 
 export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpServer {
   const server = new McpServer(
-    { name: 'fedreg-mcp-server', version: '2.0.0' }, // x-release-version
+    { name: 'fedreg-mcp-server', version: '2.0.1' }, // x-release-version
     {
       capabilities: { tools: {} },
       cacheHints: { 'tools/list': LIST_CACHE_HINT, 'server/discover': LIST_CACHE_HINT },

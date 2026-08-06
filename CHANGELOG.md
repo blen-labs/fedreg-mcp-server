@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+
+## [2.0.1] - 2026-08-06
+
+### Fixed
+- produce a valid, self-contained MCPB bundle (mcpb)
+- validate Origin on /mcp per the MCP spec MUST (http)
+
+### Changed
+- release on every merge to main (continuous releases)
+- remove all emoji from release notes and README
+- switch npm publishing to tokenless trusted publishing (OIDC)
 ### Added
 - **Origin validation on `/mcp`** (a spec MUST previously unimplemented, and
   unchanged since 1.x): browser-originated cross-site requests are rejected
@@ -138,6 +149,7 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/blen-labs/fedreg-mcp-server/releases/tag/v1.0.0

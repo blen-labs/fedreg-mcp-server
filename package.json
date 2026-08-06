@@ -1,6 +1,6 @@
 {
   "name": "@blen/fedreg-mcp-server",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Code-mode MCP server for the U.S. Federal Register, Electronic Code of Federal Regulations, and regulations.gov APIs.",
   "license": "Apache-2.0",
   "author": "BLEN, Inc. (https://blenlabs.com)",
