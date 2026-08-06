@@ -20,6 +20,14 @@ export interface HttpOptions {
   insecure?: boolean;
   /** Allowed Host header values for DNS rebinding protection. Pass [] to disable. */
   allowedHosts?: string[];
+  /**
+   * Extra Origin header values allowed on the MCP endpoint (exact origin strings,
+   * e.g. "https://app.example.com"). The server's own origin and loopback origins
+   * are always allowed; requests without an Origin header (non-browser clients)
+   * always pass. Anything else is rejected with 403 — the MCP spec requires
+   * Origin validation to block DNS-rebinding / cross-site browser access.
+   */
+  allowedOrigins?: string[];
   /** Public origin clients should use (for protected-resource metadata). */
   publicOrigin?: string;
 }
@@ -42,6 +50,20 @@ function truncate(message: string): string {
   return message.length > MAX_LOGGED_ERROR_CHARS
     ? `${message.slice(0, MAX_LOGGED_ERROR_CHARS)}…[truncated]`
     : message;
+}
+
+/** Hostnames whose origins are always acceptable: local web tooling and dev UIs. */
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+function originAllowed(originHeader: string, ownOrigin: string, allowlist: string[]): boolean {
+  const value = originHeader.toLowerCase();
+  if (value === ownOrigin.toLowerCase()) return true;
+  if (allowlist.some(allowed => allowed.toLowerCase() === value)) return true;
+  try {
+    return LOOPBACK_HOSTNAMES.has(new URL(value).hostname);
+  } catch {
+    return false; // unparseable Origin (including "null") is not allowed
+  }
 }
 
 function subjectOf(ctx: McpRequestContext): string | undefined {
@@ -114,6 +136,13 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       }
 
       if (url.pathname === MCP_PATH) {
+        // Origin validation (MCP spec MUST): a browser-originated cross-site request
+        // must not reach the transport. Non-browser clients send no Origin and pass.
+        const originHeader = req.headers.origin;
+        if (typeof originHeader === 'string' && !originAllowed(originHeader, origin, opts.allowedOrigins ?? [])) {
+          return reply(res, 403, { error: 'origin_not_allowed', origin: originHeader });
+        }
+
         // Auth (unless --insecure). Runs on every request: with no protocol session there
         // is no other point at which a caller's identity could have been established.
         let subject = 'anonymous';

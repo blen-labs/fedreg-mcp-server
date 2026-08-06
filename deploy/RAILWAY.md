@@ -25,6 +25,7 @@ Set these in **Settings → Variables**:
 |---|---|---|---|
 | `FEDREG_PUBLIC_ORIGIN` | yes | `https://your-host.example.com` | Public origin clients see. Used in OAuth resource metadata and `WWW-Authenticate` URLs. |
 | `FEDREG_ALLOWED_HOSTS` | recommended | `your-host.example.com` | Comma-separated Host header allowlist (DNS-rebinding protection). |
+| `FEDREG_ALLOWED_ORIGINS` | if browser clients | `https://app.example.com` | Extra browser Origins allowed on `/mcp`. Own origin + loopback always pass; non-browser clients (no Origin header) are unaffected. |
 | `FEDREG_LOG_LEVEL` | no | `info` | `debug`/`info`/`warn`/`error`. |
 | `FEDREG_USER_AGENT` | recommended | `acme-fedreg-mcp/1.0 (contact: ops@acme.com)` | FederalRegister.gov and eCFR appreciate identifiable user agents. |
 | `FEDREG_SANDBOX` | no | `auto` | `isolate` is best on Linux; `auto` falls back to `deno` if available. |
