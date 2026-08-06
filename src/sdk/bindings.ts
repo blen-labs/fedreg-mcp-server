@@ -16,6 +16,6 @@ export function buildSdk(cfg: SourceConfig): Sdk {
     clients,
     meta: sources.map(({ name, label, enabled, disabledReason }) => ({ name, label, enabled, disabledReason })),
     registeredNames: sources.map(s => s.name),
-    version: () => '2.0.2', // x-release-version
+    version: () => '2.0.3', // x-release-version
   };
 }
