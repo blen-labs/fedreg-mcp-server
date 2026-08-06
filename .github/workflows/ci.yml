@@ -42,6 +42,42 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  conventional-commits:
+    name: conventional commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The release pipeline computes versions and the CHANGELOG from
+      # conventional commit subjects, so non-conforming subjects are a build
+      # error, not a style nit. Merge commits are exempt (the release script
+      # skips them too).
+      - name: Validate commit subjects
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            RANGE="$BASE..$HEAD_SHA"
+          elif git rev-parse -q --verify "$BEFORE^{commit}" >/dev/null 2>&1; then
+            RANGE="$BEFORE..$HEAD_SHA"
+          else
+            RANGE="$(git describe --tags --abbrev=0)..$HEAD_SHA"
+          fi
+          echo "checking $RANGE"
+          git log --no-merges --format='%s' "$RANGE" \
+            | { grep -vE '^(feat|fix|docs|chore|ci|test|refactor|perf|build|style|revert)(\([^)]*\))?!?: .' || true; } > /tmp/bad-subjects
+          if [ -s /tmp/bad-subjects ]; then
+            echo "Non-conventional commit subjects found:"
+            cat /tmp/bad-subjects
+            echo "Format: type(scope)?: description  (types: feat fix docs chore ci test refactor perf build style revert)"
+            exit 1
+          fi
+          echo "all commit subjects conform"
+
   docker:
     name: docker build
     runs-on: ubuntu-latest
