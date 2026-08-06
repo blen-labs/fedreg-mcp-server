@@ -1,63 +1,51 @@
 name: release
 
-# Automated releases: every merge to main updates (or opens) a Release PR via
-# release-please, computed from conventional commit messages. Merging that
-# Release PR creates the git tag + GitHub Release and triggers the npm publish
-# job below. Manual bootstrap: workflow_dispatch runs publish for the current
-# checkout's version (used once for v2.0.0, which was tagged by hand).
+# Continuous release: EVERY push to main is released. The workflow runs the
+# full gates, computes the next SemVer from the conventional commits since
+# the last tag (breaking -> major, feat -> minor, everything else -> at
+# least a patch; scripts/release.mjs + scripts/release-lib.mjs), stamps
+# package.json and the x-release-version source markers, prepends the
+# CHANGELOG section, pushes a chore(release) commit with the vX.Y.Z tag,
+# creates the GitHub Release, and publishes to npm via trusted publishing
+# (OIDC) - no npm token exists anywhere.
+#
+# No-loop guarantee: the release commit is pushed with GITHUB_TOKEN, and
+# GitHub never triggers workflows for GITHUB_TOKEN-initiated events.
+# Concurrent-merge safety: if another commit lands on main mid-run, the
+# release push is rejected and this run fails; the newer push's run then
+# releases both changes together.
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      republish:
+        description: 'Recovery only: re-run gates and publish the CURRENT version to npm (no bump, no tag)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-jobs:
-  release-please:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      # With the default GITHUB_TOKEN, the Release PR triggers no CI runs
-      # (GitHub suppresses workflows for GITHUB_TOKEN-raised events). Set the
-      # optional RELEASE_PLEASE_TOKEN secret (fine-grained PAT or GitHub App
-      # token with contents + pull-requests write) so Release PRs get checks.
-      - uses: googleapis/release-please-action@v4
-        id: release
-        with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
-  publish:
-    needs: release-please
-    # Publish when release-please just cut a release, or on manual dispatch
-    # from main (bootstrap / recovery). `!cancelled()` (not `always()`) lets
-    # the dispatch path run despite the skipped release-please job while still
-    # honoring a cancel of an in-flight run.
-    if: >-
-      !cancelled() &&
-      (needs.release-please.outputs.release_created == 'true' ||
-       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+jobs:
+  release:
+    # Belt-and-braces: skip release commits should one ever arrive via a PAT.
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # release commit, tag, GitHub Release
       id-token: write # npm trusted publishing (OIDC) + provenance
     steps:
-      # Pin to the tag release-please just created; on the dispatch path the
-      # output is empty and checkout falls back to the dispatched ref (main).
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0 # full history + tags: the bump is computed from commits since the last tag
       - uses: pnpm/action-setup@v4
       # No registry-url here on purpose: setup-node's generated .npmrc would
-      # reference ${NODE_AUTH_TOKEN}, which no longer exists — publishing
+      # reference a NODE_AUTH_TOKEN env var that does not exist - publishing
       # authenticates via npm Trusted Publishing (OIDC), configured on the
       # npm package settings for this repo + release.yml.
       - uses: actions/setup-node@v4
@@ -74,12 +62,28 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - name: Compute version, stamp files, write CHANGELOG section
+        id: cut
+        if: ${{ !inputs.republish }}
+        run: node scripts/release.mjs
+      # Build AFTER stamping so dist/ carries the released version strings.
       - run: pnpm build
-      # Prove the artifact exists before publishing — the tarball's dist/ only
-      # comes from prepack, and a missing dist would otherwise ship an empty,
-      # unrunnable package.
+      # Prove the artifact exists before tagging or publishing.
       - run: test -f dist/bin.js && test -f dist/index.js && test -f dist/index.d.ts
-      # Tokenless: pnpm detects the Actions OIDC context and exchanges it for
-      # a short-lived npm credential; provenance is generated automatically
-      # for trusted-publisher publishes.
-      - run: pnpm publish --access public --no-git-checks
+      - name: Commit, tag, and create the GitHub Release
+        if: steps.cut.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.cut.outputs.version }}
+          NOTES_FILE: ${{ steps.cut.outputs.notes_file }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json CHANGELOG.md src/server/mcpServer.ts src/sdk/bindings.ts
+          git commit -m "chore(release): v${VERSION}"
+          git tag -a "v${VERSION}" -m "v${VERSION}"
+          git push origin HEAD:main --follow-tags
+          gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "${NOTES_FILE}"
+      - name: Publish to npm (trusted publishing)
+        if: steps.cut.outputs.released == 'true' || inputs.republish
+        run: pnpm publish --access public --no-git-checks

@@ -14,3 +14,4 @@ launch-video/
 # internal design-process artifacts, not for the public tree
 docs/superpowers/
 deno.lock
+release-notes.generated.md

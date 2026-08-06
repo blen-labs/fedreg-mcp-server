@@ -62,37 +62,35 @@ requests cannot catch a protocol misunderstanding shared by both sides.
 
 ## Releasing
 
-Releases are automated with [release-please](https://github.com/googleapis/release-please)
-(`.github/workflows/release.yml`):
+Releases are **continuous** (`.github/workflows/release.yml`): every push to
+`main` is released — there is no Release PR and no batching.
 
 1. Land changes on `main` using [Conventional Commits](https://www.conventionalcommits.org/)
-   (`feat:`, `fix:`, `docs:`, …; add `!` or a `BREAKING CHANGE:` footer for majors).
-   The commit types determine the next SemVer version.
-2. On every push to `main`, release-please opens or updates a **Release PR**
-   that bumps the version (in `package.json` and the annotated
-   `x-release-please-version` lines in `src/server/mcpServer.ts` and
-   `src/sdk/bindings.ts`) and drafts the CHANGELOG section.
-3. **Merging the Release PR** creates the `vX.Y.Z` tag and GitHub Release, and
-   triggers the publish job: full gates (typecheck, lint, test, build +
-   artifact check) and then `pnpm publish --access public` with npm
-   provenance.
-4. **Bootstrap / recovery**: `gh workflow run release.yml --ref main` runs the
-   publish job alone against `main`'s current `package.json` version. It
-   creates no tag and no GitHub Release, and fails with a 403 if that version
-   is already on npm — use it only for a version that was tagged by hand.
+   (`feat:`, `fix:`, `docs:`, `ci:`, …; add `!` or a `BREAKING CHANGE:` footer
+   for majors). The commit types determine the next SemVer version:
+   breaking → major, `feat` → minor, **everything else → at least a patch** —
+   every merge produces a tag and a CHANGELOG entry, by policy.
+2. On push, the workflow runs the full gates (typecheck, lint, test, build +
+   artifact check), then `scripts/release.mjs` computes the version, stamps
+   `package.json` and the `x-release-version` marker lines in
+   `src/server/mcpServer.ts` and `src/sdk/bindings.ts`, and prepends the
+   CHANGELOG section (logic lives in `scripts/release-lib.mjs`, covered by
+   `test/release.spec.ts`).
+3. The workflow pushes a `chore(release): vX.Y.Z` commit with the annotated
+   tag, creates the GitHub Release from the generated notes, and publishes to
+   npm. The release commit is pushed with `GITHUB_TOKEN`, which GitHub never
+   triggers workflows for — no release loop.
+4. **Recovery**: `gh workflow run release.yml --ref main -f republish=true`
+   re-runs the gates and republishes the *current* version to npm (no bump,
+   no tag) — for when a publish failed after a tag already existed.
 
-Setup requirements: publishing is **tokenless** via [npm Trusted
-Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC) — the npm
+Publishing is **tokenless** via [npm Trusted
+Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC): the npm
 package settings register this repo's `release.yml` as a trusted publisher,
-so no `NPM_TOKEN` secret exists or is needed; the job's `id-token: write`
-permission is what authenticates. Recommended: a `RELEASE_PLEASE_TOKEN`
-secret (fine-grained PAT or GitHub App token with contents + pull-requests
-write) — without it the Release PR is raised by `GITHUB_TOKEN` and gets
-**no CI checks**, which deadlocks against required status checks.
-Provenance is generated automatically for trusted-publisher publishes
-(public repo + `id-token: write`). The `files` field in
-`package.json` ships only `dist/`, `schema/`, `README.md`, `LICENSE`,
-`NOTICE`, `CHANGELOG.md`, and `SECURITY.md`.
+so no npm token or secret exists anywhere; the job's `id-token: write`
+permission is what authenticates, and provenance is generated automatically.
+The `files` field in `package.json` ships only `dist/`, `schema/`,
+`README.md`, `LICENSE`, `NOTICE`, `CHANGELOG.md`, and `SECURITY.md`.
 
 Breaking changes additionally need a migration note (see
 `docs/migration-v2.md` for the pattern).
