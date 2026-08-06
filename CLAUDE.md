@@ -65,6 +65,8 @@ stdio | Streamable HTTP (+OAuth, per-IP bucket, quotas)     src/server/{stdio,ht
 
 ## Hard project rules (from CONTRIBUTING / SECURITY / the PR template, plus code conventions)
 
+- **Never commit or push directly to `main`.** Every change lands via a feature branch + PR — `main` is release-bearing (every merge auto-releases), and the only direct writer is the release workflow's own `chore(release)` commit.
+
 - **Anything that weakens the sandbox is out of scope** — never add `fetch`, `import`, filesystem, env, or subprocess access to the sandbox surface. Sandbox-escape reports go to a private GitHub Security Advisory, never a public issue.
 - The public API (three tools; `fr.*`/`ecfr.*`/`regs.*` globals) is stable; breaking it needs a major version bump and migration note.
 - PR checklist beyond the four gates: HTTP-visible change → add a case to `test/http-integration.spec.ts`; sandbox-visible change → add a positive AND a negative case to `test/sandbox.spec.ts`; new SDK method → corpus entry in the owning `schema/*.json`.

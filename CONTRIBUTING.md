@@ -65,9 +65,10 @@ requests cannot catch a protocol misunderstanding shared by both sides.
 Releases are **continuous** (`.github/workflows/release.yml`): every push to
 `main` is released — there is no Release PR and no batching.
 
-1. Land changes on `main` using [Conventional Commits](https://www.conventionalcommits.org/)
+1. Land changes on `main` **via pull request** (never a direct push) using
+   [Conventional Commits](https://www.conventionalcommits.org/)
    (`feat:`, `fix:`, `docs:`, `ci:`, …; add `!` or a `BREAKING CHANGE:` footer
-   for majors). The commit types determine the next SemVer version:
+   for majors; CI enforces the format). The commit types determine the next SemVer version:
    breaking → major, `feat` → minor, **everything else → at least a patch** —
    every merge produces a tag and a CHANGELOG entry, by policy.
 2. On push, the workflow runs the full gates (typecheck, lint, test, build +
