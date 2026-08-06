@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/@blen/fedreg-mcp-server.svg)](https://www.npmjs.com/package/@blen/fedreg-mcp-server)
 [![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520.10-339933.svg)](https://nodejs.org/)
-[![MCP](https://img.shields.io/badge/MCP-1.29-7c3aed.svg)](https://modelcontextprotocol.io/)
+[![MCP](https://img.shields.io/badge/MCP-2026--07--28-7c3aed.svg)](https://modelcontextprotocol.io/specification/2026-07-28)
 
 <p align="center">
   <video src="https://github.com/blen-labs/fedreg-mcp-server/raw/main/media/fedreg-launch.mp4" poster="https://raw.githubusercontent.com/blen-labs/fedreg-mcp-server/main/media/launch-poster.png" controls muted playsinline width="760"></video>
@@ -171,7 +171,7 @@ Then point any MCP client at it:
 { "mcpServers": { "fedreg": { "type": "http", "url": "https://your-host.example.com/mcp" } } }
 ```
 
-The HTTP transport adds OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting, per-subject daily quotas, and Host-header allowlisting. A one-command Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the bundled [`Dockerfile`](./deploy/Dockerfile) precompiles `isolated-vm` and slims to a ~220 MB `node:22-bookworm-slim` runtime.
+The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id`, so requests can be load-balanced across replicas without sticky routing. Pre-2026 clients are still served through a stateless legacy fallback. It adds OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting, per-subject daily quotas, and Host-header allowlisting. A one-command Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the bundled [`Dockerfile`](./deploy/Dockerfile) precompiles `isolated-vm` and slims to a ~220 MB `node:22-bookworm-slim` runtime.
 
 ### Configuration
 
@@ -180,7 +180,7 @@ The most common knobs (full list and defaults in [`.env.example`](./.env.example
 | Variable | Default | Notes |
 |---|---|---|
 | `FEDREG_SANDBOX` | `auto` | `auto` / `isolate` / `deno` |
-| `FEDREG_USER_AGENT` | `fedreg-mcp-server/1.0 …` | Identify yourself, per FR/eCFR etiquette. |
+| `FEDREG_USER_AGENT` | `fedreg-mcp-server/2.0 …` | Identify yourself, per FR/eCFR etiquette. |
 | `FEDREG_REGS_API_KEY` | — | Free key from regulations.gov / api.data.gov. Unset ⇒ `regs` disabled (fr/ecfr unaffected). |
 | `FEDREG_REGS_BASE_URL` | `https://api.regulations.gov` | regulations.gov v4 API base URL. |
 | `FEDREG_REGS_MAX_CALLS_PER_EXECUTE` | `30` | Caps regulations.gov upstream calls per `execute()` run (rate-limit guardrail). |

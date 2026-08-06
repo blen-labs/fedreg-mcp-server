@@ -19,12 +19,15 @@ export interface ExecuteDeps {
   regsSubjectQuota: SubjectQuota;
 }
 
-/** Per-session context captured at session init (HTTP auth mode). stdio has no subject. */
-export interface SessionCtx {
+/**
+ * Per-request context, re-derived from the caller's bearer token on every HTTP request.
+ * stdio has no subject.
+ */
+export interface RequestCtx {
   subject?: string;
 }
 
-export async function execute(input: ExecuteInputT, deps: ExecuteDeps, sessionCtx?: SessionCtx) {
+export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCtx?: RequestCtx) {
   let regsCalls = 0;
   return deps.sandbox.execute(
     { code: input.code, timeoutMs: input.timeoutMs, memoryMb: input.memoryMb, bindings: deps.sdk.registeredNames },
@@ -34,8 +37,8 @@ export async function execute(input: ExecuteInputT, deps: ExecuteDeps, sessionCt
           if (regsCalls >= deps.regsMaxCallsPerExecute) {
             return Promise.resolve({ ok: false, error: { name: 'RegsCallBudgetExceeded', message: `Exceeded the per-execute regulations.gov call budget (${deps.regsMaxCallsPerExecute}). Narrow your query or paginate across separate execute calls.` } });
           }
-          if (sessionCtx?.subject) {
-            const q = deps.regsSubjectQuota.consume(sessionCtx.subject);
+          if (requestCtx?.subject) {
+            const q = deps.regsSubjectQuota.consume(requestCtx.subject);
             if (!q.allowed) {
               return Promise.resolve({ ok: false, error: { name: 'RegsSubjectQuotaExceeded', message: `Per-subject regulations.gov quota exceeded. Try again after ${new Date(q.resetAt).toISOString()}.` } });
             }

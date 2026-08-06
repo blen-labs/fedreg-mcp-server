@@ -1,7 +1,7 @@
 {
   "name": "@blen/fedreg-mcp-server",
-  "version": "1.0.0",
-  "description": "Code-mode MCP server for the U.S. Federal Register and Electronic Code of Federal Regulations APIs.",
+  "version": "2.0.0",
+  "description": "Code-mode MCP server for the U.S. Federal Register, Electronic Code of Federal Regulations, and regulations.gov APIs.",
   "license": "Apache-2.0",
   "author": "BLEN, Inc. (https://blenlabs.com)",
   "homepage": "https://github.com/blen-labs/fedreg-mcp-server#readme",
@@ -67,7 +67,8 @@
     "mcpb:pack": "mcpb pack"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "acorn": "^8.12.1",
     "acorn-walk": "^8.3.4",
     "jose": "^5.9.6",
@@ -80,6 +81,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",
+    "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "^22.10.2",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",

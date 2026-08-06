@@ -1,12 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { buildMcpServer } from './mcpServer.js';
+import { createMcpHandler, type AuthInfo, type McpRequestContext } from '@modelcontextprotocol/server';
+import { toNodeHandler } from '@modelcontextprotocol/node';
+import { buildMcpServer, MCP_PROTOCOL_VERSION } from './mcpServer.js';
 import type { CatalogDeps } from './toolCatalog.js';
 import { IpRateLimiter } from './ipRateLimiter.js';
 import { SubjectQuota } from '../util/quotas.js';
 import { buildVerifier, type AuthConfig } from './authz.js';
+import type { JWTPayload } from 'jose';
 import { oauthProtectedResource } from './wellKnown.js';
 import { log } from '../util/logger.js';
 
@@ -15,7 +15,6 @@ export interface HttpOptions {
   host: string;
   rps: number;
   burst: number;
-  maxSessions: number;
   subjectDailyQuota: number;
   auth: AuthConfig;
   insecure?: boolean;
@@ -33,16 +32,62 @@ export interface HttpHandle {
 const MCP_PATH = '/mcp';
 const RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource/mcp';
 
+/** Key the tool-catalog context off the subject this request authenticated as. */
+const SUBJECT_KEY = 'fedreg.subject';
+
+/** Cap on echoed error text: handler rejections quote caller-supplied headers and body. */
+const MAX_LOGGED_ERROR_CHARS = 300;
+
+function truncate(message: string): string {
+  return message.length > MAX_LOGGED_ERROR_CHARS
+    ? `${message.slice(0, MAX_LOGGED_ERROR_CHARS)}…[truncated]`
+    : message;
+}
+
+function subjectOf(ctx: McpRequestContext): string | undefined {
+  const s = ctx.authInfo?.extra?.[SUBJECT_KEY];
+  return typeof s === 'string' ? s : undefined;
+}
+
+/**
+ * Scopes actually granted to the presented token, read from the standard OAuth claims
+ * (`scope` as a space-delimited string, or `scp` as an array).
+ *
+ * Deliberately NOT `opts.auth.scopes` — that is the server's advertised
+ * `scopes_supported` list, and copying it here would hand every caller an `AuthInfo`
+ * claiming every configured scope regardless of what its token was granted.
+ */
+function grantedScopes(claims: JWTPayload): string[] {
+  const raw = claims.scope ?? claims.scp;
+  if (typeof raw === 'string') return raw.split(' ').filter(Boolean);
+  if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === 'string');
+  return [];
+}
+
 export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<HttpHandle> {
   const verifier = buildVerifier(opts.auth);
   const limiter = new IpRateLimiter(opts.rps, opts.burst);
   const quota = new SubjectQuota(opts.subjectDailyQuota);
 
-  // One transport per MCP session (initialize -> sessionId).
-  const transports = new Map<string, StreamableHTTPServerTransport>();
-  // The authenticated subject that owns each session, recorded at init. Used to reject
-  // requests that reuse another tenant's session id (per-subject quota integrity).
-  const sessionSubjects = new Map<string, string>();
+  // Stateless: the factory runs once per request, so the subject a tool sees is always the
+  // one this request's own bearer token verified as. There is no session to bind, reuse, or
+  // outlive a token — per-tenant quota attribution follows from re-authenticating every call.
+  const mcpHandler = createMcpHandler(
+    (ctx) => buildMcpServer(deps, { subject: subjectOf(ctx) }),
+    {
+      legacy: 'stateless',
+      // This server declares only `tools`, but the SDK routes `subscriptions/listen`
+      // regardless and would otherwise hold up to 1024 long-lived SSE streams per handler
+      // — unbounded long-lived state of exactly the kind `FEDREG_MAX_SESSIONS` used to cap.
+      // `0` refuses every listen request (the limit check is `open.size >= max`).
+      maxSubscriptions: 0,
+      // Rejections carry attacker-supplied header/body fragments, so cap what reaches stderr.
+      onerror: (err) => log.warn('mcp.handler.error', { message: truncate(err.message) }),
+    },
+  );
+  const nodeHandler = toNodeHandler(mcpHandler, {
+    onerror: (err) => log.warn('mcp.adapter.error', { message: truncate(err.message) }),
+  });
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -65,12 +110,15 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       }
 
       if (url.pathname === '/health' && req.method === 'GET') {
-        return reply(res, 200, { ok: true, sandbox: deps.sandbox.kind, sessions: transports.size });
+        return reply(res, 200, { ok: true, sandbox: deps.sandbox.kind, protocolVersion: MCP_PROTOCOL_VERSION });
       }
 
       if (url.pathname === MCP_PATH) {
-        // Auth (unless --insecure)
+        // Auth (unless --insecure). Runs on every request: with no protocol session there
+        // is no other point at which a caller's identity could have been established.
         let subject = 'anonymous';
+        let token = '';
+        let scopes: string[] = [];
         if (!opts.insecure) {
           const auth = req.headers.authorization;
           if (!auth?.startsWith('Bearer ')) {
@@ -80,9 +128,11 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
             });
             return res.end(JSON.stringify({ error: 'unauthorized' }));
           }
+          token = auth.slice(7);
           try {
-            const ctx = await verifier.verify(auth.slice(7));
+            const ctx = await verifier.verify(token);
             subject = ctx.subject;
+            scopes = grantedScopes(ctx.claims);
           } catch (err) {
             res.writeHead(401, {
               'content-type': 'application/json',
@@ -96,62 +146,16 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
           }
         }
 
-        const sessionHeader = req.headers['mcp-session-id'];
-        const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
+        // toNodeHandler forwards `req.auth` to the factory as pass-through authInfo.
+        const authInfo: AuthInfo = {
+          token,
+          clientId: subject,
+          scopes,
+          extra: { [SUBJECT_KEY]: subject },
+        };
+        (req as IncomingMessage & { auth?: AuthInfo }).auth = authInfo;
 
-        // Parse body for POST so we can inspect for initialize requests; the transport
-        // accepts a pre-parsed body via the third argument.
-        let parsedBody: unknown;
-        if (req.method === 'POST') {
-          parsedBody = await readJson(req);
-        }
-
-        let transport: StreamableHTTPServerTransport | undefined =
-          sessionId ? transports.get(sessionId) : undefined;
-
-        // Reject requests that reuse an existing session id under a different subject.
-        // Only applies to authenticated requests against an already-open session; the
-        // initialize request (no transport yet) and insecure mode are exempt.
-        if (transport && !opts.insecure && sessionId) {
-          const owner = sessionSubjects.get(sessionId);
-          if (owner !== undefined && owner !== subject) {
-            return reply(res, 403, { error: 'session_subject_mismatch' });
-          }
-        }
-
-        if (!transport) {
-          // No session yet: must be an initialize POST.
-          if (req.method !== 'POST' || !isInitializeRequest(parsedBody)) {
-            return reply(res, 400, {
-              error: 'session_required',
-              message: 'Open a session by POSTing an initialize request first.',
-            });
-          }
-          if (transports.size >= opts.maxSessions) {
-            return reply(res, 503, { error: 'session_limit', limit: opts.maxSessions });
-          }
-          transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            onsessioninitialized: (id) => {
-              transports.set(id, transport!);
-              sessionSubjects.set(id, subject);
-              log.info('mcp.session.open', { sessionId: id, subject });
-            },
-            onsessionclosed: (id) => {
-              transports.delete(id);
-              sessionSubjects.delete(id);
-              log.info('mcp.session.close', { sessionId: id, subject });
-            },
-          });
-          // The subject is captured once at session init; in current MCP usage one
-          // session corresponds to one authenticated user. Subsequent requests that
-          // reuse this session id under a different subject are actively rejected (403)
-          // above, so the per-subject regs quota cannot be mis-attributed across tenants.
-          const mcp = buildMcpServer(deps, { subject });
-          await mcp.connect(transport);
-        }
-
-        await transport.handleRequest(req, res, parsedBody);
+        await nodeHandler(req, res);
         return;
       }
 
@@ -170,15 +174,18 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
     insecure: opts.insecure ?? false,
     sandbox: deps.sandbox.kind,
     auth: opts.auth.provider,
+    protocolVersion: MCP_PROTOCOL_VERSION,
   });
 
   return {
     port: actualPort,
     close: async () => {
+      // Handler first: `server.close()` only stops new connections and resolves once every
+      // existing one is idle, so an open SSE exchange (kept warm by keepalive frames) would
+      // block it forever. Closing the handler aborts in-flight exchanges and releases those
+      // sockets, after which the listener can actually drain.
+      await mcpHandler.close();
       await new Promise<void>(r => server.close(() => r()));
-      for (const t of transports.values()) await t.close();
-      transports.clear();
-      sessionSubjects.clear();
     },
   };
 }
@@ -186,12 +193,4 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
 function reply(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(JSON.stringify(body));
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  if (chunks.length === 0) return undefined;
-  const text = Buffer.concat(chunks).toString('utf8');
-  try { return JSON.parse(text); } catch { return undefined; }
 }
