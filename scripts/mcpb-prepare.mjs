@@ -19,7 +19,7 @@ const manifest = {
   name: 'fedreg-mcp-server',
   display_name: 'Federal Register & eCFR (Code Mode)',
   version: JSON.parse(await import('node:fs').then(fs => fs.promises.readFile(resolve(root, 'package.json'), 'utf8'))).version,
-  description: 'Code-mode MCP server exposing FederalRegister.gov and eCFR APIs via fr.* and ecfr.* SDK bindings.',
+  description: 'Code-mode MCP server exposing FederalRegister.gov, eCFR, and regulations.gov APIs via fr.*, ecfr.*, and regs.* SDK bindings.',
   entry_point: 'dist/bin.js',
   runtime: 'node',
   transport: 'stdio',

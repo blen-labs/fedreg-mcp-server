@@ -1,35 +1,21 @@
-import type { Dispatcher } from 'undici';
-import { HttpClient } from '../util/httpClient.js';
-import { FederalRegisterClient } from './fr-client.js';
-import { EcfrClient } from './ecfr-client.js';
+import { getSources, type SourceConfig } from './sources/index.js';
+import type { SourceMeta } from './sources/source.js';
 
-export interface SdkConfig {
-  frBaseUrl: string;
-  ecfrBaseUrl: string;
-  userAgent: string;
-  timeoutMs: number;
-  retries: number;
-  cacheTtlMs: number;
-  cacheMaxItems: number;
-  dispatcher?: Dispatcher;
+export interface Sdk {
+  clients: Record<string, object>;   // enabled sources only
+  meta: SourceMeta[];                // all registered sources (redacted)
+  registeredNames: string[];         // all names (drives global injection)
+  version: () => string;
 }
 
-export function buildSdk(cfg: SdkConfig) {
-  const common = {
-    userAgent: cfg.userAgent,
-    timeoutMs: cfg.timeoutMs,
-    retries: cfg.retries,
-    cacheTtlMs: cfg.cacheTtlMs,
-    cacheMaxItems: cfg.cacheMaxItems,
-    ...(cfg.dispatcher ? { dispatcher: cfg.dispatcher } : {}),
-  };
-  const frHttp = new HttpClient({ baseUrl: cfg.frBaseUrl, ...common });
-  const ecfrHttp = new HttpClient({ baseUrl: cfg.ecfrBaseUrl, ...common });
+export function buildSdk(cfg: SourceConfig): Sdk {
+  const sources = getSources(cfg);
+  const clients: Record<string, object> = {};
+  for (const s of sources) if (s.enabled) clients[s.name] = s.client;
   return {
-    fr: new FederalRegisterClient(frHttp),
-    ecfr: new EcfrClient(ecfrHttp),
+    clients,
+    meta: sources.map(({ name, label, enabled, disabledReason }) => ({ name, label, enabled, disabledReason })),
+    registeredNames: sources.map(s => s.name),
     version: () => '1.0.0',
   };
 }
-
-export type Sdk = ReturnType<typeof buildSdk>;

@@ -55,12 +55,29 @@ async function main(): Promise<void> {
   const deps = await buildSupervisor({
     frBaseUrl: process.env.FEDREG_FR_BASE_URL ?? 'https://www.federalregister.gov/api/v1',
     ecfrBaseUrl: process.env.FEDREG_ECFR_BASE_URL ?? 'https://www.ecfr.gov/api',
+    regsBaseUrl: process.env.FEDREG_REGS_BASE_URL ?? 'https://api.regulations.gov',
+    regsApiKey: process.env.FEDREG_REGS_API_KEY,
     userAgent: process.env.FEDREG_USER_AGENT ?? 'fedreg-mcp-server/1.0 (+https://github.com/blen-labs/fedreg-mcp-server)',
     upstreamTimeoutMs: Number(process.env.FEDREG_UPSTREAM_TIMEOUT_MS ?? 20_000),
     upstreamRetries: Number(process.env.FEDREG_UPSTREAM_RETRIES ?? 3),
     cacheTtlMs: Number(process.env.FEDREG_CACHE_TTL_MS ?? 300_000),
     cacheMaxItems: Number(process.env.FEDREG_CACHE_MAX_ITEMS ?? 2000),
     sandbox: args.sandbox,
+    regsMaxCallsPerExecute: (() => {
+      const n = Number(process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE ?? 30);
+      return Number.isFinite(n) && n >= 0 ? n : 30;
+    })(),
+    regsRatePerHour: (() => {
+      // Require >= 1: a rate of 0 would silently block ALL regs calls (it is NOT
+      // "unlimited"). To disable regs, leave FEDREG_REGS_API_KEY unset instead.
+      const n = Number(process.env.FEDREG_REGS_RATE_PER_HOUR ?? 1000);
+      return Number.isFinite(n) && n >= 1 ? n : 1000;
+    })(),
+    regsSubjectRatePerHour: (() => {
+      // Require >= 1; per-subject hourly cap, not "unlimited".
+      const n = Number(process.env.FEDREG_REGS_SUBJECT_RATE_PER_HOUR ?? 500);
+      return Number.isFinite(n) && n >= 1 ? n : 500;
+    })(),
   });
 
   let handle: HttpHandle | undefined;

@@ -27,7 +27,7 @@ export class DenoRunner implements SandboxRunner {
       return { ok: false, logs: [], error: { name: 'PolicyError', message: policy.errors.join('; ') }, durationMs: Date.now() - started };
     }
 
-    const runner = buildDenoRunner(opts.code, opts.timeoutMs ?? 15_000);
+    const runner = buildDenoRunner(opts.code, opts.timeoutMs ?? 15_000, opts.bindings ?? []);
     // Write the runner to a temp file rather than piping it on stdin: `deno run -`
     // reads the program from stdin until EOF, but we keep stdin open as the RPC
     // channel, so it would never start. A file path leaves stdin free for RPC.
@@ -72,7 +72,7 @@ export class DenoRunner implements SandboxRunner {
           stdoutBuf = stdoutBuf.subarray(9 + len);
           const msg = JSON.parse(payload) as
             | { kind: 'log'; text: string }
-            | { kind: 'rpc'; id: number; binding: 'fr' | 'ecfr'; path: string[]; args: unknown[] }
+            | { kind: 'rpc'; id: number; binding: string; path: string[]; args: unknown[] }
             | { kind: 'result'; ok: boolean; value?: unknown; error?: { name: string; message: string } };
           if (msg.kind === 'log') {
             logs.push(msg.text);
@@ -116,7 +116,10 @@ function writeFrame(stream: NodeJS.WritableStream, obj: unknown): void {
   stream.write(len + '\n' + payload);
 }
 
-function buildDenoRunner(userCode: string, timeoutMs: number): string {
+// `bindings` is interpolated into the generated source via JSON.stringify; it is safe
+// only because names are pre-validated as JS identifiers by getSources()
+// (src/sdk/sources/index.ts). Do NOT pass unvalidated strings here.
+export function buildDenoRunner(userCode: string, timeoutMs: number, bindings: string[]): string {
   // Runs inside deno. Talks to host over stdin/stdout with the same framing.
   return `
 const enc = new TextEncoder();
@@ -176,8 +179,8 @@ function makeProxy(binding) {
   return handler([]);
 }
 
-globalThis.fr = makeProxy('fr');
-globalThis.ecfr = makeProxy('ecfr');
+const __bindings = ${JSON.stringify(bindings)};
+for (const name of __bindings) { globalThis[name] = makeProxy(name); }
 
 const origLog = console.log;
 console.log = (...a) => writeFrame({ kind: 'log', text: a.map(String).join(' ') });

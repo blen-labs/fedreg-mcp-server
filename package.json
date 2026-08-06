@@ -17,6 +17,8 @@
     "model-context-protocol",
     "federal-register",
     "ecfr",
+    "regulations.gov",
+    "public-comments",
     "code-mode",
     "sandbox",
     "isolated-vm",

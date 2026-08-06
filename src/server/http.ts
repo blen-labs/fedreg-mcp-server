@@ -40,6 +40,9 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
 
   // One transport per MCP session (initialize -> sessionId).
   const transports = new Map<string, StreamableHTTPServerTransport>();
+  // The authenticated subject that owns each session, recorded at init. Used to reject
+  // requests that reuse another tenant's session id (per-subject quota integrity).
+  const sessionSubjects = new Map<string, string>();
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -106,6 +109,16 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
         let transport: StreamableHTTPServerTransport | undefined =
           sessionId ? transports.get(sessionId) : undefined;
 
+        // Reject requests that reuse an existing session id under a different subject.
+        // Only applies to authenticated requests against an already-open session; the
+        // initialize request (no transport yet) and insecure mode are exempt.
+        if (transport && !opts.insecure && sessionId) {
+          const owner = sessionSubjects.get(sessionId);
+          if (owner !== undefined && owner !== subject) {
+            return reply(res, 403, { error: 'session_subject_mismatch' });
+          }
+        }
+
         if (!transport) {
           // No session yet: must be an initialize POST.
           if (req.method !== 'POST' || !isInitializeRequest(parsedBody)) {
@@ -121,14 +134,20 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (id) => {
               transports.set(id, transport!);
+              sessionSubjects.set(id, subject);
               log.info('mcp.session.open', { sessionId: id, subject });
             },
             onsessionclosed: (id) => {
               transports.delete(id);
+              sessionSubjects.delete(id);
               log.info('mcp.session.close', { sessionId: id, subject });
             },
           });
-          const mcp = buildMcpServer(deps);
+          // The subject is captured once at session init; in current MCP usage one
+          // session corresponds to one authenticated user. Subsequent requests that
+          // reuse this session id under a different subject are actively rejected (403)
+          // above, so the per-subject regs quota cannot be mis-attributed across tenants.
+          const mcp = buildMcpServer(deps, { subject });
           await mcp.connect(transport);
         }
 
@@ -159,6 +178,7 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       await new Promise<void>(r => server.close(() => r()));
       for (const t of transports.values()) await t.close();
       transports.clear();
+      sessionSubjects.clear();
     },
   };
 }

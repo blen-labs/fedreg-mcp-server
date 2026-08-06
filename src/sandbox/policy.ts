@@ -2,7 +2,7 @@ import { parse } from 'acorn';
 import { simple } from 'acorn-walk';
 import type { Node } from 'acorn';
 
-const BANNED_GLOBALS = new Set([
+export const BANNED_GLOBALS = new Set([
   'process', 'require', 'global', 'globalThis', 'Buffer', 'Deno',
   '__dirname', '__filename', 'module', 'exports', 'eval', 'Function',
   'WebAssembly', 'XMLHttpRequest', 'fetch', 'WebSocket', 'Worker',

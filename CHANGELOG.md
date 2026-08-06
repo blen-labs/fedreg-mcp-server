@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **regulations.gov source** — a third SDK binding, `regs.*`
+  (`documents`, `comments`, `dockets`, each with `search` / `get`), exposing
+  public comments, dockets, and live comment-period status. Requires a free
+  API key (`FEDREG_REGS_API_KEY`); the key is held host-side and never reaches
+  the sandbox. Without it, `regs` is disabled (`SourceUnavailable`) while `fr`
+  and `ecfr` keep working. Configurable via `FEDREG_REGS_BASE_URL` and a
+  per-`execute()` upstream-call budget (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`,
+  default 30).
+- **regulations.gov rate guardrails** — to protect the shared api.data.gov key:
+  a process-wide hourly token bucket (`FEDREG_REGS_RATE_PER_HOUR`, default 1000;
+  in-memory, so it does not coordinate across replicas), a per-authenticated-subject
+  hourly quota in HTTP mode (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`, default 500), and
+  no-429-retry on `regs`. The GET response cache key now also incorporates a redacted
+  auth-context hash (no cross-key cache bleed), and the authenticated subject is bound
+  to its MCP session (a session id reused with a different token is rejected).
+
+### Changed
+- **Per-source corpora** — the merged `schema/field-dictionary.json` is now
+  split into per-source files (`schema/{fr,ecfr,regs}.json`), each loaded by
+  its own `Source` via a registry (`getSources`).
+
 ## [1.0.0] - 2026-05-20
 
 Initial public release.

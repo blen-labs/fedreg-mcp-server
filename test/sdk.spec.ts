@@ -1,23 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockAgent } from 'undici';
-import { buildSdk } from '../src/sdk/bindings.js';
+import { FederalRegisterClient } from '../src/sdk/fr-client.js';
+import { EcfrClient } from '../src/sdk/ecfr-client.js';
+import { HttpClient } from '../src/util/httpClient.js';
 
 const FR_ORIGIN = 'https://www.federalregister.gov';
 const ECFR_ORIGIN = 'https://www.ecfr.gov';
 
 let agent: MockAgent;
 
-function sdk() {
-  return buildSdk({
-    frBaseUrl: `${FR_ORIGIN}/api/v1`,
-    ecfrBaseUrl: `${ECFR_ORIGIN}/api`,
-    userAgent: 'test/0.0',
-    timeoutMs: 5000,
-    retries: 0,
-    cacheTtlMs: 0,
-    cacheMaxItems: 0,
-    dispatcher: agent,
-  });
+function frClient() {
+  return new FederalRegisterClient(new HttpClient({ baseUrl: `${FR_ORIGIN}/api/v1`, userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0, dispatcher: agent }));
+}
+function ecfrClient() {
+  return new EcfrClient(new HttpClient({ baseUrl: `${ECFR_ORIGIN}/api`, userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0, dispatcher: agent }));
 }
 
 describe('FederalRegisterClient', () => {
@@ -39,7 +35,7 @@ describe('FederalRegisterClient', () => {
       method: 'GET',
     }).reply(200, { results: [] });
 
-    const out = await sdk().fr.documents.search({
+    const out = await frClient().documents.search({
       conditions: {
         term: 'methane',
         agencies: ['environmental-protection-agency'],
@@ -56,7 +52,7 @@ describe('FederalRegisterClient', () => {
       .intercept({ path: '/api/v1/documents/2024-12345.json', method: 'GET' })
       .reply(200, { document_number: '2024-12345' });
 
-    const out = await sdk().fr.documents.get('2024-12345') as { document_number: string };
+    const out = await frClient().documents.get('2024-12345') as { document_number: string };
     expect(out.document_number).toBe('2024-12345');
   });
 
@@ -65,7 +61,7 @@ describe('FederalRegisterClient', () => {
       .intercept({ path: '/api/v1/agencies', method: 'GET' })
       .reply(200, [{ slug: 'epa' }]);
 
-    const out = await sdk().fr.agencies.list() as Array<{ slug: string }>;
+    const out = await frClient().agencies.list() as Array<{ slug: string }>;
     expect(out[0]?.slug).toBe('epa');
   });
 });
@@ -86,7 +82,7 @@ describe('EcfrClient', () => {
       method: 'GET',
     }).reply(200, { results: [] });
 
-    const out = await sdk().ecfr.search.results({
+    const out = await ecfrClient().search.results({
       query: 'methane',
       agency_slugs: ['environmental-protection-agency'],
     }) as { results: unknown[] };
@@ -98,7 +94,7 @@ describe('EcfrClient', () => {
       .intercept({ path: '/api/versioner/v1/structure/2024-01-01/title-40.json', method: 'GET' })
       .reply(200, { type: 'title' });
 
-    const out = await sdk().ecfr.structure('2024-01-01', 40) as { type: string };
+    const out = await ecfrClient().structure('2024-01-01', 40) as { type: string };
     expect(out.type).toBe('title');
   });
 
@@ -107,7 +103,7 @@ describe('EcfrClient', () => {
       .intercept({ path: '/api/versioner/v1/full/2024-01-01/title-40.xml', method: 'GET' })
       .reply(200, '<TITLE/>', { headers: { 'content-type': 'application/xml' } });
 
-    const out = await sdk().ecfr.full('2024-01-01', 40);
+    const out = await ecfrClient().full('2024-01-01', 40);
     expect(typeof out).toBe('string');
     expect(out).toContain('<TITLE');
   });

@@ -1,15 +1,16 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { buildCatalog, type CatalogDeps } from './toolCatalog.js';
+import type { SessionCtx } from '../tools/execute.js';
 import { log } from '../util/logger.js';
 
-export function buildMcpServer(deps: CatalogDeps): Server {
+export function buildMcpServer(deps: CatalogDeps, sessionCtx?: SessionCtx): Server {
   const server = new Server(
     { name: 'fedreg-mcp-server', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
 
-  const catalog = buildCatalog(deps);
+  const catalog = buildCatalog(deps, sessionCtx);
   const byName = new Map(catalog.map(t => [t.name, t]));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

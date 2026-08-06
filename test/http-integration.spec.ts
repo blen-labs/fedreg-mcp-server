@@ -2,8 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MockAgent } from 'undici';
 import { startHttp, type HttpHandle } from '../src/server/http.js';
 import { buildSdk } from '../src/sdk/bindings.js';
+import { getSources } from '../src/sdk/sources/index.js';
+import { buildCorpus } from '../src/search/corpus.js';
 import { pickSandbox } from '../src/sandbox/index.js';
 import type { CatalogDeps } from '../src/server/toolCatalog.js';
+import { SubjectQuota } from '../src/util/quotas.js';
 
 let handle: HttpHandle;
 let base: string;
@@ -21,6 +24,7 @@ beforeAll(async () => {
   const sdk = buildSdk({
     frBaseUrl: 'https://www.federalregister.gov/api/v1',
     ecfrBaseUrl: 'https://www.ecfr.gov/api',
+    regsBaseUrl: 'https://api.regulations.gov',
     userAgent: 'test/0.0',
     timeoutMs: 5000,
     retries: 0,
@@ -29,7 +33,11 @@ beforeAll(async () => {
     dispatcher: mockAgent,
   });
   const sandbox = await pickSandbox('auto');
-  const deps: CatalogDeps = { sdk, sandbox };
+  const corpus = buildCorpus(getSources({
+    frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+    regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
+  }));
+  const deps: CatalogDeps = { sdk, sandbox, corpus, regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) };
   handle = await startHttp(deps, {
     host: '127.0.0.1',
     port: 0,
@@ -196,10 +204,15 @@ describe('Auth enforcement', () => {
     const sdk = buildSdk({
       frBaseUrl: 'https://www.federalregister.gov/api/v1',
       ecfrBaseUrl: 'https://www.ecfr.gov/api',
+      regsBaseUrl: 'https://api.regulations.gov',
       userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
     });
     const sandbox = await pickSandbox('auto');
-    secured = await startHttp({ sdk, sandbox }, {
+    const corpus = buildCorpus(getSources({
+      frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+      regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
+    }));
+    secured = await startHttp({ sdk, sandbox, corpus, regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) }, {
       host: '127.0.0.1', port: 0,
       rps: 1000, burst: 1000, maxSessions: 100, subjectDailyQuota: 1_000_000,
       insecure: false,
@@ -219,5 +232,20 @@ describe('Auth enforcement', () => {
     });
     expect(r.status).toBe(401);
     expect(r.headers.get('www-authenticate') ?? '').toMatch(/resource_metadata=/);
+  });
+
+  // Session-subject binding: a session opened by subject A must reject follow-up requests
+  // that reuse its session id under subject B (403 session_subject_mismatch). This guards
+  // per-subject regs quota integrity (see src/server/http.ts).
+  //
+  // Skipped: the public startHttp/AuthConfig harness cannot mint two DISTINCT subjects.
+  // Both 'none' and 'embedded' providers use NoopVerifier, which always returns subject
+  // 'anonymous' regardless of the bearer token; the OIDC providers require a live JWKS
+  // endpoint (createRemoteJWKSet) that this in-process harness does not stand up. Exercising
+  // a real mismatch would require injecting a custom multi-subject verifier that the current
+  // public surface does not expose, so the enforcement is verified by code review instead.
+  it.skip('rejects reuse of a session id under a different subject (403)', async () => {
+    // Would: initialize as subject A, then POST to the same mcp-session-id with subject B's
+    // token and assert status 403 + body.error === 'session_subject_mismatch'.
   });
 });

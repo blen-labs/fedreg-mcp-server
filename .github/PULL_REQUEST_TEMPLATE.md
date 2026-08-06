@@ -14,7 +14,7 @@
 - [ ] `pnpm build`
 - [ ] If HTTP-visible: added/updated a case in `test/http-integration.spec.ts`
 - [ ] If sandbox-visible: added a positive and a negative case in `test/sandbox.spec.ts`
-- [ ] If new SDK method: added an entry in `schema/field-dictionary.json`
+- [ ] If new SDK method: added an entry in the source's corpus (`schema/{fr,ecfr,regs}.json`)
 
 ## Risk
 

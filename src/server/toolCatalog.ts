@@ -1,9 +1,11 @@
 import { SearchApiInput, searchApi } from '../tools/searchApi.js';
 import { DescribeSchemaInput, describeSchema } from '../tools/describeSchema.js';
-import { ExecuteInput, execute } from '../tools/execute.js';
+import { ExecuteInput, execute, type SessionCtx } from '../tools/execute.js';
 import { zodToJsonSchema } from './zodToJsonSchema.js';
 import type { Sdk } from '../sdk/bindings.js';
 import type { SandboxRunner } from '../sandbox/types.js';
+import type { Corpus } from '../search/corpus.js';
+import type { SubjectQuota } from '../util/quotas.js';
 
 export interface ToolDescriptor {
   name: string;
@@ -15,30 +17,35 @@ export interface ToolDescriptor {
 export interface CatalogDeps {
   sdk: Sdk;
   sandbox: SandboxRunner;
+  corpus: Corpus;
+  regsMaxCallsPerExecute: number;
+  regsSubjectQuota: SubjectQuota;
 }
 
-export function buildCatalog(deps: CatalogDeps): ToolDescriptor[] {
+export function buildCatalog(deps: CatalogDeps, sessionCtx?: SessionCtx): ToolDescriptor[] {
+  const names = deps.sdk.registeredNames.join(', ');
+  const namespaces = deps.sdk.registeredNames.map(n => `${n}.*`).join(', ');
   return [
     {
       name: 'search_api',
       description:
-        'BM25 search over Federal Register and eCFR API endpoints and the curated field dictionary. Returns TypeScript signatures and examples for use in execute.',
+        `BM25 search over the API endpoints and curated field dictionary for all bound sources (${names}). Returns TypeScript signatures and examples for use in execute.`,
       inputSchema: zodToJsonSchema(SearchApiInput),
-      handler: async (args) => searchApi(SearchApiInput.parse(args)),
+      handler: async (args) => searchApi(SearchApiInput.parse(args), deps.corpus),
     },
     {
       name: 'describe_schema',
       description:
-        'Look up an endpoint or field by exact dotted id (path) or by namespace prefix. Use to drill into fr.* and ecfr.* surfaces.',
+        `Look up an endpoint or field by exact dotted id (path) or by namespace prefix. Use to drill into the bound source surfaces (${namespaces}).`,
       inputSchema: zodToJsonSchema(DescribeSchemaInput),
-      handler: async (args) => describeSchema(DescribeSchemaInput.parse(args)),
+      handler: async (args) => describeSchema(DescribeSchemaInput.parse(args), deps.corpus.entries),
     },
     {
       name: 'execute',
       description:
-        'Run TypeScript inside a sandbox (no net, fs, env, or subprocess). Globals `fr` and `ecfr` proxy to FederalRegister.gov and eCFR. Return the awaited expression as the result.',
+        `Run TypeScript inside a sandbox (no net, fs, env, or subprocess). Globals: ${deps.sdk.registeredNames.join(', ')}. Return the awaited expression as the result.`,
       inputSchema: zodToJsonSchema(ExecuteInput),
-      handler: async (args) => execute(ExecuteInput.parse(args), deps),
+      handler: async (args) => execute(ExecuteInput.parse(args), deps, sessionCtx),
     },
   ];
 }

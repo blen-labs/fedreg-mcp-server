@@ -2,6 +2,7 @@ export interface ExecuteOptions {
   code: string;
   timeoutMs?: number;
   memoryMb?: number;
+  bindings?: string[];
 }
 
 export interface ExecuteResult {
@@ -21,7 +22,7 @@ export interface SandboxRunner {
 }
 
 export interface RpcCall {
-  binding: 'fr' | 'ecfr';
+  binding: string;
   path: string[];
   args: unknown[];
 }

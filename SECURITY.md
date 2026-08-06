@@ -59,9 +59,15 @@ The `execute` tool runs user-supplied TypeScript with two layered defenses:
      temporary file so stdin stays free for the host RPC channel.
 
 Both runners deny network access to user code; the only way to reach
-upstream APIs is via the `fr.*` / `ecfr.*` proxies, which serialize calls
-through a host-side RPC and execute them against the configured URL
-allowlist (`FEDREG_FR_BASE_URL`, `FEDREG_ECFR_BASE_URL`).
+upstream APIs is via the `fr.*` / `ecfr.*` / `regs.*` proxies, which serialize
+calls through a host-side RPC and execute them against the configured URL
+allowlist (`FEDREG_FR_BASE_URL`, `FEDREG_ECFR_BASE_URL`,
+`FEDREG_REGS_BASE_URL`).
+
+The regulations.gov API key (`FEDREG_REGS_API_KEY`) is held host-side in the
+`HttpClient` and is **never exposed to sandboxed user code**: it is injected
+into the upstream request on the host side of the RPC bridge, not passed into
+the sandbox, so user code cannot read or exfiltrate it.
 
 We treat any of the following as a vulnerability:
 - Reading the contents of any file under `/`.

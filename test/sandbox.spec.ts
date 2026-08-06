@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { preflight } from '../src/sandbox/policy.js';
+import { buildDenoRunner } from '../src/sandbox/deno.js';
+import { IsolateRunner } from '../src/sandbox/isolate.js';
 
 describe('sandbox policy preflight', () => {
   it('allows simple SDK calls', () => {
@@ -25,5 +27,23 @@ describe('sandbox policy preflight', () => {
 
   it('rejects dynamic import', () => {
     expect(preflight(`await import('fs')`).ok).toBe(false);
+  });
+});
+
+describe('dynamic binding injection', () => {
+  it('deno runner injects exactly the given bindings via JSON.stringify', () => {
+    const runner = buildDenoRunner('return 1;', 1000, ['fr', 'ecfr', 'regs']);
+    expect(runner).toContain('["fr","ecfr","regs"]');
+    expect(runner).toContain('globalThis[name] = makeProxy(name)');
+    expect(runner).not.toContain('globalThis.fr =');
+  });
+
+  it('isolate injects bindings as working proxies (gated on availability)', async () => {
+    const runner = new IsolateRunner();
+    if (!(await runner.available())) return; // skip where isolated-vm cannot load
+    const bridge = { dispatch: async () => ({ ok: true, value: 'OK' }) };
+    const res = await runner.execute({ code: 'return (typeof fr) + "," + (await fr.documents.search());', bindings: ['fr', 'ecfr'] }, bridge);
+    expect(res.ok).toBe(true);
+    expect(res.value).toBe('function,OK');
   });
 });
