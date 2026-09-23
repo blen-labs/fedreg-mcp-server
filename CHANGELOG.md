@@ -11,6 +11,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+
+## [2.0.6] - 2026-09-23
+
+### Fixed
+- describe execute as plain JavaScript and sync docs with the SDK surface
+- restrict RPC dispatch and advertise tool safety metadata
 ## [2.0.5] - 2026-08-06
 
 ### Changed
@@ -169,7 +175,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.5...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.6...HEAD
+[2.0.6]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.2...v2.0.3
