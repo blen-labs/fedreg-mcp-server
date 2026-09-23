@@ -221,8 +221,8 @@ are responsible for their own policies.
 
 ---
 
+Built with ❤️ by [BLEN, Inc](https://www.blencorp.com).
+
 ## About BLEN
 
 BLEN, Inc is a digital services company that provides Emerging Technology (ML/AI, RPA), Digital Modernization (Legacy to Cloud), and Human-Centered Web/Mobile Design and Development.
-
-Built by [BLEN, Inc](https://www.blenlabs.com).
