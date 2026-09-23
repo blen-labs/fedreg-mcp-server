@@ -22,6 +22,6 @@ export function buildSdk(cfg: SourceConfig): Sdk {
     methods: Object.freeze(methods),
     meta: sources.map(({ name, label, enabled, disabledReason }) => ({ name, label, enabled, disabledReason })),
     registeredNames: sources.map(s => s.name),
-    version: () => '2.0.7', // x-release-version
+    version: () => '2.0.8', // x-release-version
   };
 }

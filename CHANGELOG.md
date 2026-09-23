@@ -13,6 +13,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+
+## [2.0.8] - 2026-09-23
+
+### Changed
+- Correct company name and link in README
 ## [2.0.7] - 2026-09-23
 
 ### Changed
@@ -180,7 +185,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.7...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.8...HEAD
+[2.0.8]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.7...v2.0.8
 [2.0.7]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.4...v2.0.5
