@@ -1,3 +1,4 @@
+import type { ToolAnnotations } from '@modelcontextprotocol/server';
 import { SearchApiInput, searchApi } from '../tools/searchApi.js';
 import { DescribeSchemaInput, describeSchema } from '../tools/describeSchema.js';
 import { ExecuteInput, execute, type RequestCtx } from '../tools/execute.js';
@@ -9,7 +10,9 @@ import type { SubjectQuota } from '../util/quotas.js';
 
 export interface ToolDescriptor {
   name: string;
+  title: string;
   description: string;
+  annotations: ToolAnnotations;
   inputSchema: Record<string, unknown>;
   handler: (args: unknown) => Promise<unknown>;
 }
@@ -28,6 +31,8 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
   return [
     {
       name: 'search_api',
+      title: 'Search Regulatory API Documentation',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
         `BM25 search over the API endpoints and curated field dictionary for all bound sources (${names}). Returns TypeScript signatures and examples for use in execute.`,
       inputSchema: zodToJsonSchema(SearchApiInput),
@@ -35,6 +40,8 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
     },
     {
       name: 'describe_schema',
+      title: 'Describe Regulatory API Schema',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
         `Look up an endpoint or field by exact dotted id (path) or by namespace prefix. Use to drill into the bound source surfaces (${namespaces}).`,
       inputSchema: zodToJsonSchema(DescribeSchemaInput),
@@ -42,6 +49,10 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
     },
     {
       name: 'execute',
+      title: 'Query Federal Regulatory Data',
+      // The sandbox SDK only reads upstream data. Idempotence describes external
+      // effects, not identical results; annotations do not enforce permissions.
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       description:
         `Run TypeScript inside a sandbox (no net, fs, env, or subprocess). Globals: ${names}. Return the awaited expression as the result.`,
       inputSchema: zodToJsonSchema(ExecuteInput),

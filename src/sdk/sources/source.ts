@@ -9,9 +9,14 @@ export interface SourceMeta {
 }
 
 export interface Source extends SourceMeta {
-  client: object;        // host-side client reachable as <name>.* in the sandbox
+  client: object;        // host-side client, never traversed by sandbox RPC
+  methods: RpcMethods;   // explicit public dotted paths, relative to the binding
   corpus: { endpoints: CorpusEntry[]; fields: CorpusEntry[] };
 }
+
+// Each registered function retains its concrete argument contract at registration.
+// Runtime arguments cross the sandbox bridge as data, never as host references.
+export type RpcMethods = Readonly<Record<string, (...args: any[]) => unknown>>;
 
 export interface SourceConfig {
   frBaseUrl: string;

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MockAgent } from 'undici';
+import type { Tool } from '@modelcontextprotocol/server';
+import { expectToolMetadata } from './tool-metadata.js';
 import { startHttp, type HttpHandle } from '../src/server/http.js';
 import { buildSdk } from '../src/sdk/bindings.js';
 import { getSources } from '../src/sdk/sources/index.js';
@@ -11,6 +13,7 @@ import { SubjectQuota } from '../src/util/quotas.js';
 let handle: HttpHandle;
 let base: string;
 let mockAgent: MockAgent;
+let sandboxAvailable: boolean;
 
 beforeAll(async () => {
   mockAgent = new MockAgent();
@@ -28,11 +31,12 @@ beforeAll(async () => {
     userAgent: 'test/0.0',
     timeoutMs: 5000,
     retries: 0,
-    cacheTtlMs: 0,
-    cacheMaxItems: 0,
+    cacheTtlMs: 60_000,
+    cacheMaxItems: 10,
     dispatcher: mockAgent,
   });
   const sandbox = await pickSandbox('auto');
+  sandboxAvailable = await sandbox.available();
   const corpus = buildCorpus(getSources({
     frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
     regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
@@ -124,6 +128,29 @@ async function rpc(
 }
 
 describe('Streamable HTTP transport', () => {
+  it('blocks internal methods and cross-request cache poisoning over MCP', async ({ skip }) => {
+    if (!sandboxAvailable) return skip();
+    const call = async (code: string) => {
+      const response = await rpc('tools/call', { name: 'execute', arguments: { code, timeoutMs: 3000 } });
+      expect(response.status).toBe(200);
+      const body = response.body as { result: { content: Array<{ text: string }> } };
+      return JSON.parse(body.result.content[0]!.text) as { ok: boolean; value?: unknown };
+    };
+    const attack = await call(`
+      const errors = [];
+      try { await fr.http.call({ method: 'POST', path: '/blocked' }); errors.push('ALLOWED'); }
+      catch (e) { errors.push(e.name); }
+      try { await fr.http.cache.set('https://www.federalregister.gov/api/v1/agencies', { status: 200, body: [{ slug: 'forged' }], headers: {} }); errors.push('ALLOWED'); }
+      catch (e) { errors.push(e.name); }
+      return errors;
+    `);
+    expect(attack.ok).toBe(true);
+    expect(attack.value).toEqual(['TypeError', 'TypeError']);
+    const read = await call('return await fr.agencies.list();');
+    expect(read.ok).toBe(true);
+    expect(read.value).toEqual([{ slug: 'epa', short_name: 'EPA' }, { slug: 'doe', short_name: 'DOE' }]);
+  });
+
   it('serves OAuth 2.0 Protected Resource Metadata', async () => {
     const r = await fetch(`${base}/.well-known/oauth-protected-resource/mcp`);
     expect(r.status).toBe(200);
@@ -147,7 +174,8 @@ describe('Streamable HTTP transport', () => {
     expect(list.status).toBe(200);
     // The protocol-level session is gone: nothing to steal, reuse, or bind a subject to.
     expect(list.sessionId).toBeUndefined();
-    const listBody = list.body as { result?: { tools?: Array<{ name: string }> } };
+    const listBody = list.body as { result?: { tools?: Tool[] } };
+    expectToolMetadata(listBody.result?.tools ?? []);
     const names = (listBody?.result?.tools ?? []).map(t => t.name).sort();
     expect(names).toEqual(['describe_schema', 'execute', 'search_api']);
   });
@@ -284,7 +312,8 @@ describe('Legacy 2025-era compatibility', () => {
     // Legacy serving is per-request and stateless, so no session id is issued to pin to.
     const list = await post(`${base}/mcp`, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
     expect(list.status).toBe(200);
-    const listBody = list.body as { result?: { tools?: Array<{ name: string }> } };
+    const listBody = list.body as { result?: { tools?: Tool[] } };
+    expectToolMetadata(listBody.result?.tools ?? []);
     expect((listBody?.result?.tools ?? []).map(t => t.name).sort())
       .toEqual(['describe_schema', 'execute', 'search_api']);
   });

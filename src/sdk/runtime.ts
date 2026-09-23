@@ -1,4 +1,4 @@
-import type { SourceMeta } from './sources/source.js';
+import type { RpcMethods, SourceMeta } from './sources/source.js';
 
 export interface RpcRequest {
   binding: string;
@@ -13,13 +13,20 @@ export interface RpcResponse {
 }
 
 export interface DispatchRegistry {
-  clients: Record<string, object>;
+  methods: Readonly<Record<string, RpcMethods>>;
   meta: SourceMeta[];
 }
 
 export async function dispatch(reg: DispatchRegistry, req: RpcRequest): Promise<RpcResponse> {
-  const client = reg.clients[req.binding];
-  if (!client) {
+  // Validate the RPC envelope independently of AST preflight. Dotted keys inside
+  // a single path segment must not alias an explicitly registered method.
+  if (!req || typeof req.binding !== 'string' || !Array.isArray(req.path)
+    || req.path.length === 0 || !req.path.every(p => typeof p === 'string' && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(p))
+    || !Array.isArray(req.args)) {
+    return { ok: false, error: { name: 'TypeError', message: 'Invalid SDK call' } };
+  }
+  const methods = Object.getOwnPropertyDescriptor(reg.methods, req.binding)?.value as RpcMethods | undefined;
+  if (!methods) {
     const m = reg.meta.find(x => x.name === req.binding);
     if (m && !m.enabled) {
       return { ok: false, error: { name: 'SourceUnavailable', message: m.disabledReason ?? `${m.label} is unavailable` } };
@@ -27,19 +34,13 @@ export async function dispatch(reg: DispatchRegistry, req: RpcRequest): Promise<
     return { ok: false, error: { name: 'TypeError', message: `Cannot resolve binding '${req.binding}'` } };
   }
   try {
-    let cur: unknown = client;
-    let parent: unknown = client;
-    for (const seg of req.path) {
-      if (cur === null || typeof cur !== 'object') {
-        return { ok: false, error: { name: 'TypeError', message: `Cannot resolve ${req.binding}.${req.path.join('.')}` } };
-      }
-      parent = cur;
-      cur = (cur as Record<string, unknown>)[seg];
-    }
-    if (typeof cur !== 'function') {
+    // Resolve only an own data property in the source's explicit registry.
+    // Never walk the client object: TypeScript `private` is not a runtime boundary.
+    const method = Object.getOwnPropertyDescriptor(methods, req.path.join('.'))?.value;
+    if (typeof method !== 'function') {
       return { ok: false, error: { name: 'TypeError', message: `${req.binding}.${req.path.join('.')} is not a function` } };
     }
-    const value = await (cur as (...a: unknown[]) => unknown).apply(parent, req.args);
+    const value = await method(...req.args);
     return { ok: true, value };
   } catch (err) {
     const e = err as { name?: string; message?: string; status?: number };

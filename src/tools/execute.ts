@@ -45,7 +45,7 @@ export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCt
           }
           regsCalls++;
         }
-        return dispatch({ clients: deps.sdk.clients, meta: deps.sdk.meta }, req);
+        return dispatch(deps.sdk, req);
       },
     },
   );

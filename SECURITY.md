@@ -65,6 +65,12 @@ calls through a host-side RPC and execute them against the configured URL
 allowlist (`FEDREG_FR_BASE_URL`, `FEDREG_ECFR_BASE_URL`,
 `FEDREG_REGS_BASE_URL`).
 
+The dispatcher resolves exact method names from each source's explicit, frozen
+`methods` table. It never traverses the host client object or inherited
+properties. Only the registered read methods are callable; HTTP clients,
+caches, and other host internals are outside the RPC surface. New SDK methods
+must be explicitly registered before sandboxed code can call them.
+
 The regulations.gov API key (`FEDREG_REGS_API_KEY`) is held host-side in the
 `HttpClient` and is **never exposed to sandboxed user code**: it is injected
 into the upstream request on the host side of the RPC bridge, not passed into

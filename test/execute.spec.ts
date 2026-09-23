@@ -34,12 +34,17 @@ function fakeMixedRunner(frCalls: number, regsCalls: number): SandboxRunner {
 
 const sdk = {
   clients: { regs: { documents: { search: async () => ({ data: [] }) } } } as Record<string, object>,
+  methods: { regs: { 'documents.search': async () => ({ data: [] }) } },
   meta: [{ name: 'regs', label: 'Regulations.gov', enabled: true }],
   registeredNames: ['regs'],
   version: () => '1.0.0',
 };
 
 const mixedSdk = {
+  methods: {
+    fr: { 'documents.search': async () => ({ results: [] }) },
+    regs: { 'documents.search': async () => ({ data: [] }) },
+  },
   clients: {
     fr: { documents: { search: async () => ({ results: [] }) } },
     regs: { documents: { search: async () => ({ data: [] }) } },

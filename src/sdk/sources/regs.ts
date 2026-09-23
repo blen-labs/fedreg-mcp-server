@@ -14,12 +14,21 @@ export function createRegsSource(cfg: SourceConfig): Source {
     ...(cfg.regsPreflightLimiter ? { preflightLimiter: cfg.regsPreflightLimiter } : {}),
     ...(cfg.dispatcher ? { dispatcher: cfg.dispatcher } : {}),
   });
+  const client = new RegulationsClient(http);
   return {
     name: 'regs',
     label: 'Regulations.gov',
     enabled,
     disabledReason: enabled ? undefined : 'regulations.gov requires an API key. Set FEDREG_REGS_API_KEY (free at https://open.gsa.gov/api/regulationsgov/).',
-    client: new RegulationsClient(http),
+    client,
+    methods: Object.freeze({
+      'documents.search': client.documents.search,
+      'documents.get': client.documents.get,
+      'comments.search': client.comments.search,
+      'comments.get': client.comments.get,
+      'dockets.search': client.dockets.search,
+      'dockets.get': client.dockets.get,
+    }),
     corpus: loadSourceCorpus('regs'),
   };
 }
