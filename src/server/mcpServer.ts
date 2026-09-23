@@ -52,7 +52,9 @@ export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpS
     server.registerTool(
       tool.name,
       {
+        title: tool.title,
         description: tool.description,
+        annotations: tool.annotations,
         // The catalog emits JSON Schema; `fromJsonSchema` attaches the SDK's default Ajv
         // validator, so arguments are checked here BEFORE the handler re-parses with Zod.
         // Note `zodToJsonSchema` emits `additionalProperties: false`, so unknown argument

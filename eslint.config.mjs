@@ -14,5 +14,7 @@ export default [
       'no-console': 'off',
     },
   },
-  { ignores: ['dist/**', 'node_modules/**'] },
+  // examples/ are `execute` snippets (top-level return), not modules; test/examples.spec.ts
+  // validates them with the sandbox's own preflight parser instead.
+  { ignores: ['dist/**', 'node_modules/**', 'examples/**'] },
 ];

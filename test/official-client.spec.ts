@@ -13,6 +13,7 @@ import { buildCorpus } from '../src/search/corpus.js';
 import { pickSandbox } from '../src/sandbox/index.js';
 import type { CatalogDeps } from '../src/server/toolCatalog.js';
 import { SubjectQuota } from '../src/util/quotas.js';
+import { expectToolMetadata } from './tool-metadata.js';
 
 /**
  * Drives the server with the OFFICIAL MCP client SDK rather than hand-built requests.
@@ -78,6 +79,7 @@ describe('official MCP client SDK', () => {
     const client = await connect({ mode: 'auto' });
     try {
       const listed = await client.listTools();
+      expectToolMetadata(listed.tools);
       expect(listed.tools.map(t => t.name).sort())
         .toEqual(['describe_schema', 'execute', 'search_api']);
       // Cache metadata the 2026-07-28 revision requires on list results.
@@ -99,6 +101,7 @@ describe('official MCP client SDK', () => {
     const client = await connect({ mode: { pin: MCP_PROTOCOL_VERSION } });
     try {
       const listed = await client.listTools();
+      expectToolMetadata(listed.tools);
       expect(listed.tools).toHaveLength(3);
       // Assert something only the modern leg produces, so a pin that silently degraded to
       // legacy negotiation fails here instead of passing on the tool count alone.

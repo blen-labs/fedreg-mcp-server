@@ -7,13 +7,16 @@ to do before sending anything non-trivial, and we'll figure it out together.
 ## Ground rules
 
 - The server's whole reason for existing is to be a safe place to run untrusted
-  TypeScript against three public APIs. **Anything that weakens the sandbox is
+  JavaScript against three public APIs. **Anything that weakens the sandbox is
   out of scope.** That includes adding `fetch`, `import`, filesystem, env,
   or subprocess access to the sandbox surface.
 - New SDK methods are welcome but must be paired with field/endpoint entries
   in the corpus so `search_api` and `describe_schema` can surface them. Each
   source owns its own file — `schema/{fr,ecfr,regs}.json` — so add the entry to
   the file for the source you're touching.
+  Explicitly register each callable method in the source factory's `methods`
+  table as well. RPC dispatch only invokes registered methods; never expose a
+  generic HTTP client, cache, or other host implementation detail there.
 - Public API shape (the three tools, the `fr.*` / `ecfr.*` / `regs.*` globals)
   is stable; breaking changes need a major version bump and a migration note.
 

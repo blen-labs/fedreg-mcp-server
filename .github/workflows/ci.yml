@@ -30,7 +30,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
 
       # Deno so the fallback sandbox runner is actually exercised (its tests
-      # gate on availability and silently no-op without a runner).
+      # gate on availability and report a skip without a runner).
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x

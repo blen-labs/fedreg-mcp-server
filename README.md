@@ -18,7 +18,7 @@ This is a [Model Context Protocol](https://modelcontextprotocol.io) server that 
 - **[Electronic Code of Federal Regulations (eCFR)](https://www.ecfr.gov)** — the current, continuously updated text of the Code of Federal Regulations.
 - **[regulations.gov](https://www.regulations.gov)** — public comments, dockets, and live comment-period status for federal rulemakings.
 
-Instead of bolting on dozens of rigid, narrow tools, it hands the model a small, well-typed TypeScript SDK and lets it write the exact query it needs — then runs that code in a locked-down sandbox. This is the **code-mode** pattern, and it makes wide government APIs usable without overwhelming the model with tool definitions.
+Instead of bolting on dozens of rigid, narrow tools, it hands the model a small, well-documented SDK and lets it write the exact query it needs in JavaScript — then runs that code in a locked-down sandbox. This is the **code-mode** pattern, and it makes wide government APIs usable without overwhelming the model with tool definitions.
 
 > Independent open-source project. It calls public U.S. government APIs and is not affiliated with or endorsed by the U.S. government.
 
@@ -50,7 +50,7 @@ const rules = await fr.documents.search({
 ## Features
 
 - **Three official sources, one server** — the full Federal Register v1 (`fr.*`), eCFR (`ecfr.*`), and regulations.gov v4 (`regs.*`) APIs behind one server.
-- **Code mode, not tool sprawl** — the model writes TypeScript against typed `fr` / `ecfr` / `regs` SDKs instead of juggling dozens of single-purpose tools.
+- **Code mode, not tool sprawl** — the model writes JavaScript against the `fr` / `ecfr` / `regs` SDKs instead of juggling dozens of single-purpose tools.
 - **Safe by construction** — user code runs in an `isolated-vm` (or Deno) sandbox with **no network, filesystem, env, or subprocess access**. The only way out is to the three upstream government APIs.
 - **Runs anywhere MCP does** — stdio for Claude Desktop, or a remote Streamable HTTP server with OAuth, rate limiting, and quotas.
 - **Discovery built in** — `search_api` and `describe_schema` help the model (and you) find the right call fast.
@@ -126,9 +126,11 @@ Three tools, in the order the model uses them:
 
 | Tool | What it does |
 |---|---|
-| `search_api(query, k?)` | Finds the right endpoint/field via BM25 over the SDK docs. Returns ready-to-run TypeScript snippets. |
+| `search_api(query, k?)` | Finds the right endpoint/field via BM25 over the SDK docs. Returns signatures and ready-to-run JavaScript snippets. |
 | `describe_schema({ path? \| prefix? })` | Looks up an exact call or lists a whole namespace. |
-| `execute({ code, timeoutMs?, memoryMb? })` | Runs TypeScript in the sandbox, with `fr`, `ecfr`, and `regs` as globals. (`regs` is always defined; without `FEDREG_REGS_API_KEY` its calls return a `SourceUnavailable` error rather than a `ReferenceError`.) |
+| `execute({ code, timeoutMs?, memoryMb? })` | Runs JavaScript (no type annotations; top-level `await`/`return` allowed) in the sandbox, with `fr`, `ecfr`, and `regs` as globals. (`regs` is always defined; without `FEDREG_REGS_API_KEY` its calls return a `SourceUnavailable` error rather than a `ReferenceError`.) |
+
+All three tools carry MCP annotations marking them read-only and non-destructive (`execute` is additionally `openWorldHint: true`, since it reaches the upstream APIs), so clients that honor annotations can auto-approve them.
 
 A request flows from the MCP client through `execute` into the sandbox; the `fr.*` / `ecfr.*` / `regs.*` globals are thin proxies that marshal each call across a host-side RPC bridge to the real APIs:
 

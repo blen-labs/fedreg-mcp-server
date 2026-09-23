@@ -1,22 +1,23 @@
 # Examples
 
-Each file here is a snippet you can paste into the `execute` tool. They're
-written as standalone TypeScript so editors can syntax-check them; the
-`declare const fr: any` / `declare const ecfr: any` / `declare const regs: any`
-lines exist only to keep the type checker happy outside the sandbox.
+Each file here is a snippet you can paste verbatim into the `execute` tool.
+They're plain JavaScript — the sandbox rejects TypeScript type annotations —
+and use top-level `await` and `return`, which `execute` allows because it wraps
+your code in an async function. `fr`, `ecfr`, and `regs` are sandbox globals,
+so the files aren't runnable with plain `node`.
 
 | File | Demonstrates |
 |------|--------------|
-| [`fr-search.ts`](./fr-search.ts) | Federal Register: structured `documents.search` with `conditions`, `fields`, ordering. |
-| [`ecfr-search.ts`](./ecfr-search.ts) | eCFR: `counts_hierarchy` + paginated `search.results` for one agency. |
-| [`regs-comments.ts`](./regs-comments.ts) | regulations.gov: the fr → regs bridge — find a rule, then pull its public comments via `objectId`. |
+| [`fr-search.js`](./fr-search.js) | Federal Register: structured `documents.search` with `conditions`, `fields`, ordering. |
+| [`ecfr-search.js`](./ecfr-search.js) | eCFR: `counts_hierarchy` + paginated `search.results` for one agency. |
+| [`regs-comments.js`](./regs-comments.js) | regulations.gov: the fr → regs bridge — find a rule, then pull its public comments via `objectId`. |
 
 ## Tips for sandboxed code
 
 - Prefer `fields` on `fr.documents.search` to keep responses small.
 - For exploratory queries, set `per_page` low (5–25) and only widen when
   you know what you're after.
-- `ecfr.full` returns large XML — always pass a `scope` (at least `{ part }`)
+- `ecfr.full` returns large XML — always pass a `query` (at least `{ part }`)
   to stay under a few MB.
 - Use `await` freely; the proxies are async by construction.
 - Errors thrown inside `execute` (including `HttpError` from a non-2xx
