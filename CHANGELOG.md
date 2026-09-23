@@ -12,6 +12,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+
+## [2.0.7] - 2026-09-23
+
+### Changed
+- add hosted connector privacy policy and terms
 ## [2.0.6] - 2026-09-23
 
 ### Fixed
@@ -175,7 +180,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.6...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.7...HEAD
+[2.0.7]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.3...v2.0.4
