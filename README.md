@@ -206,6 +206,13 @@ Contributions are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the
 
 [Apache-2.0](./LICENSE) © 2026 BLEN, Inc. See also [`NOTICE`](./NOTICE).
 
+## Hosted service policies
+
+The BLEN-hosted connector's [Privacy Policy](./legal/privacy-policy.md) and
+[Terms of Service](./legal/terms.md) describe data handling and conditions of
+use. The software remains licensed under Apache-2.0; self-hosted operators
+are responsible for their own policies.
+
 ## Acknowledgements
 
 - The U.S. Government Publishing Office and the National Archives for publishing the Federal Register and eCFR APIs.
