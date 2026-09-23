@@ -25,15 +25,21 @@ Cloudflare popularized and that `clinicaltrials-mcp-server` uses:
 |-------------------|---------|
 | `search_api`      | BM25 over the per-source endpoint + field corpora |
 | `describe_schema` | Exact path lookup or namespace enumeration (`prefix`) |
-| `execute`         | Run TypeScript in a sandbox against `fr.*` / `ecfr.*` / `regs.*` |
+| `execute`         | Run JavaScript (no type annotations) in a sandbox against `fr.*` / `ecfr.*` / `regs.*` |
+
+Each tool also advertises a human-readable `title` and MCP tool annotations:
+all three are `readOnlyHint: true`, `destructiveHint: false`,
+`idempotentHint: true`; only `execute` sets `openWorldHint: true` (it reaches
+upstream APIs). Annotations are hints for clients — enforcement is the sandbox
+and the method allowlist below.
 
 ## SDK bindings
 
-Up to three sibling globals are injected into the sandbox:
+Three sibling globals are always injected into the sandbox:
 
 - **`fr.*`** — FederalRegister.gov v1: `documents`, `publicInspection`,
   `agencies`, `issues`, `suggestedSearches`, `images`.
-- **`ecfr.*`** — eCFR: `titles`, `admin.agencies`, `structure`, `ancestry`,
+- **`ecfr.*`** — eCFR: `titles`, `admin.{agencies, corrections, corrections_for_title}`, `structure`, `ancestry`,
   `versions`, `full`, `search.{results, counts_*, suggestions}`.
 - **`regs.*`** — regulations.gov v4: `documents`, `comments`, `dockets`, each
   with `search()` / `get()`. Responses are raw JSON:API
@@ -42,8 +48,9 @@ Up to three sibling globals are injected into the sandbox:
 
 The bindings are implemented in TypeScript on the host
 (`src/sdk/{fr,ecfr,regs}-client.ts`) and exposed inside the sandbox as Proxy
-objects that RPC back to the host. The host translates each RPC call into
-a parameterized HTTP request, threading through retry, LRU caching, and a
+objects that RPC back to the host. The host looks the dotted path up in the
+source's explicit method table and invokes that method, which issues a
+parameterized HTTP request, threading through retry, LRU caching, and a
 configurable user agent.
 
 ### Source registry
@@ -54,6 +61,13 @@ assembles the list, validates that each name is a safe JS identifier that does
 not collide with a sandbox global, and hands the set to the supervisor and the
 sandbox global injector. Adding a source is one factory plus one line here —
 the tools, sandbox injection, and dispatch are all registry-driven.
+
+Each factory also returns a frozen `methods` table mapping dotted paths
+(`'documents.search'`, `'agencies.list'`, …) to the public client methods. The
+dispatcher resolves calls **only** as own properties of that table — it never
+walks the client object — so the HTTP client, its cache, and inherited
+properties are unreachable from the sandbox. A new SDK method must be
+registered there (and given a corpus entry) before sandboxed code can call it.
 
 A `Source` reports `enabled` / `disabledReason`. All registered sources are
 injected as sandbox globals (so a disabled source never throws a
@@ -166,7 +180,7 @@ Bearer authentication is gated by `FEDREG_AUTH_PROVIDER`:
 | `none`   | No verification. Combine with `--insecure` (HTTP only). |
 | `embedded` | **No verification.** Any bearer token is accepted as subject `anonymous`, same as `none`. DEV ONLY — never expose this to a network. |
 | `generic-oidc` | JWKS via `jose` against `FEDREG_AUTH_JWKS_URL`. |
-| `clerk`, `workos`, `auth0` | Preset issuer/JWKS shapes for the named provider. |
+| `clerk`, `workos`, `auth0` | Aliases of `generic-oidc` — no presets; set `FEDREG_AUTH_JWKS_URL`, `FEDREG_AUTH_ISSUER`, and `FEDREG_AUTH_AUDIENCE` for your tenant. |
 
 The HTTP transport also enforces:
 
@@ -195,7 +209,8 @@ The HTTP transport also enforces:
 - An in-memory LRU keyed on canonical URL **plus a redacted hash of the request's
   auth headers**, so a cached response is never served across different
   `X-Api-Key` values (no cross-key cache bleed). 5 minutes by default.
-- Exponential backoff on `429` and `5xx` (3 retries by default).
+- Exponential backoff on network errors, `5xx`, and `429` (3 retries by
+  default) — except regulations.gov, whose `429`s are surfaced immediately.
 - A configurable user agent — please set yours per FederalRegister.gov /
   eCFR etiquette via `FEDREG_USER_AGENT`.
 
@@ -220,5 +235,5 @@ schema/
 test/                      # vitest specs
 examples/                  # snippets you can paste into `execute`
 deploy/                    # Dockerfile, railway.toml, RAILWAY.md
-docs/                      # this file + sdk-reference.md
+docs/                      # this file, sdk-reference.md, migration-v2.md, release-notes/
 ```

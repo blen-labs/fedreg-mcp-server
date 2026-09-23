@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`@blen/fedreg-mcp-server` — a "code-mode" MCP server for three U.S. government APIs: Federal Register (`fr.*`), eCFR (`ecfr.*`), and regulations.gov (`regs.*`). Instead of dozens of narrow tools it exposes exactly three — `search_api`, `describe_schema`, `execute` — and lets the model write TypeScript that runs in a locked-down sandbox with one global per source. Transports: stdio (default) and Streamable HTTP (`--http`).
+`@blen/fedreg-mcp-server` — a "code-mode" MCP server for three U.S. government APIs: Federal Register (`fr.*`), eCFR (`ecfr.*`), and regulations.gov (`regs.*`). Instead of dozens of narrow tools it exposes exactly three — `search_api`, `describe_schema`, `execute` — and lets the model write JavaScript that runs in a locked-down sandbox with one global per source. Transports: stdio (default) and Streamable HTTP (`--http`).
 
 ## Commands
 
@@ -13,7 +13,7 @@ Run everything from this directory (`pnpm@10.33.0` pinned via `packageManager`; 
 ```bash
 pnpm install
 pnpm typecheck                          # tsc --noEmit — THE correctness gate; covers src/ AND test/
-pnpm test                               # vitest run (all 12 spec files, ~1s, no network/keys needed)
+pnpm test                               # vitest run (all test/*.spec.ts, ~1s, no network/keys needed)
 pnpm test test/search.spec.ts           # single file (args forward to vitest, no -- needed)
 pnpm test test/search.spec.ts -t "bm25" # single test by name (pair with file path to keep it fast)
 pnpm lint                               # eslint . — minimal config (unused-vars only); passing means little
@@ -52,7 +52,7 @@ stdio | Streamable HTTP (+OAuth, per-IP bucket, quotas)     src/server/{stdio,ht
 
 **Corpus** (`schema/{fr,ecfr,regs}.json`): hand-written, NOT generated. `search_api`/`describe_schema` only surface what's in these files, so every new SDK method needs a matching corpus entry (PR-template checkbox). Loaded at runtime via `readFileSync(resolve(__dirname, '../../../schema/...'))` from the compiled location — `schema/` must ship as a sibling of `dist/`, and moving `src/sdk/sources/` breaks the path.
 
-**Sandbox**: two layers — an acorn AST preflight (`src/sandbox/policy.ts`, bans imports/eval/`process`/`globalThis`/`constructor`/`__proto__`/etc.) and then either `isolated-vm` (fresh V8 isolate, heap cap + timeout) or a `deno run --no-prompt` subprocess (no `--allow-*` flags; RPC over stdin/stdout with hex-length frames; **`memoryMb` is silently ignored on the Deno path**). User code is wrapped in `(async () => { ... })()`, so top-level `await`/`return` are legal. `pickSandbox` never throws — with no runner, the server still starts and `execute` returns `SandboxUnavailable`.
+**Sandbox**: two layers — an acorn AST preflight (`src/sandbox/policy.ts`, bans imports/eval/`process`/`globalThis`/`constructor`/`__proto__`/etc.) and then either `isolated-vm` (fresh V8 isolate, heap cap + timeout) or a `deno run --no-prompt` subprocess (no `--allow-*` flags; RPC over stdin/stdout with hex-length frames; **`memoryMb` is silently ignored on the Deno path**). User code is wrapped in `(async () => { ... })()`, so top-level `await`/`return` are legal. The preflight parses plain JavaScript — TypeScript syntax is a `PolicyError`, and nothing strips types; `test/examples.spec.ts` keeps `examples/*.js` pasteable. `pickSandbox` never throws — with no runner, the server still starts and `execute` returns `SandboxUnavailable`.
 
 **HTTP transport** (`src/server/http.ts`): MCP `2026-07-28` — stateless, no `initialize` handshake, no `Mcp-Session-Id`. `createMcpHandler` builds a fresh `McpServer` + tool catalog **per request** via a factory, so the subject a tool sees always comes from that request's own bearer token; auth runs on every request. Pre-2026 clients are served by the SDK's stateless legacy fallback (`legacy: 'stateless'`), and `GET`/`DELETE /mcp` return 405. Auth is real only for the OIDC providers (`generic-oidc`/`clerk`/`workos`/`auth0` via jose JWKS); `none` and `embedded` map to a NoopVerifier that accepts any bearer token as subject `anonymous` (`src/auth/embedded.ts`'s `mintDevToken` is dead code). stdio has no auth and no subject, so per-subject quotas are skipped there.
 
@@ -69,7 +69,7 @@ stdio | Streamable HTTP (+OAuth, per-IP bucket, quotas)     src/server/{stdio,ht
 
 - **Anything that weakens the sandbox is out of scope** — never add `fetch`, `import`, filesystem, env, or subprocess access to the sandbox surface. Sandbox-escape reports go to a private GitHub Security Advisory, never a public issue.
 - The public API (three tools; `fr.*`/`ecfr.*`/`regs.*` globals) is stable; breaking it needs a major version bump and migration note.
-- PR checklist beyond the four gates: HTTP-visible change → add a case to `test/http-integration.spec.ts`; sandbox-visible change → add a positive AND a negative case to `test/sandbox.spec.ts`; new SDK method → corpus entry in the owning `schema/*.json`.
+- PR checklist beyond the four gates: HTTP-visible change → add a case to `test/http-integration.spec.ts`; sandbox-visible change → add a positive AND a negative case to `test/sandbox.spec.ts`; new SDK method → corpus entry in the owning `schema/*.json`, a `methods`-table registration in its source factory, and a row in `test/dispatch.spec.ts`.
 - ESM everywhere: relative imports use the `.js` extension even in `.ts` sources.
 - Logs go to stderr only (`src/util/logger.ts`) — stdout is reserved for stdio JSON-RPC; a stray `console.log` in server code corrupts the protocol stream.
 

@@ -5,7 +5,7 @@ import type { SandboxRunner } from '../sandbox/types.js';
 import { SubjectQuota } from '../util/quotas.js';
 
 export const ExecuteInput = z.object({
-  code: z.string().min(1).describe('TypeScript code to run inside the sandbox. SDK globals are bound per source (e.g. `fr`, `ecfr`, `regs`).'),
+  code: z.string().min(1).describe('JavaScript to run inside the sandbox (plain JS: TypeScript type annotations are rejected; top-level await/return are allowed). SDK globals are bound per source (e.g. `fr`, `ecfr`, `regs`).'),
   timeoutMs: z.number().int().min(100).max(60_000).default(15_000),
   memoryMb: z.number().int().min(16).max(256).default(64),
 });

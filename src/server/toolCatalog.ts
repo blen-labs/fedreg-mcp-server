@@ -34,7 +34,7 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
       title: 'Search Regulatory API Documentation',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       description:
-        `BM25 search over the API endpoints and curated field dictionary for all bound sources (${names}). Returns TypeScript signatures and examples for use in execute.`,
+        `BM25 search over the API endpoints and curated field dictionary for all bound sources (${names}). Returns method signatures and JavaScript examples for use in execute.`,
       inputSchema: zodToJsonSchema(SearchApiInput),
       handler: async (args) => searchApi(SearchApiInput.parse(args), deps.corpus),
     },
@@ -54,7 +54,7 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
       // effects, not identical results; annotations do not enforce permissions.
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       description:
-        `Run TypeScript inside a sandbox (no net, fs, env, or subprocess). Globals: ${names}. Return the awaited expression as the result.`,
+        `Run JavaScript inside a sandbox (no net, fs, env, or subprocess). Plain JS only — TypeScript type annotations are rejected. Globals: ${names}. Top-level await is allowed; \`return\` the value you want as the result.`,
       inputSchema: zodToJsonSchema(ExecuteInput),
       handler: async (args) => execute(ExecuteInput.parse(args), deps, requestCtx),
     },

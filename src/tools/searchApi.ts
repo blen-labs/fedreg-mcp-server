@@ -18,5 +18,5 @@ export function searchApi(input: SearchApiInputT, corpus: Corpus): { hits: Searc
     const e = corpus.entries.get(s.id)!;
     return { id: e.id, kind: e.kind, binding: e.binding, description: e.description, signature: e.signature, example: e.example, score: Math.round(s.score * 1000) / 1000 };
   });
-  return { hits, note: 'Use describe_schema with `path` for exact lookup or `prefix` to explore a namespace. Use execute to run TypeScript against the bound source globals.' };
+  return { hits, note: 'Use describe_schema with `path` for exact lookup or `prefix` to explore a namespace. Use execute to run JavaScript (no type annotations) against the bound source globals.' };
 }

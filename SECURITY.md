@@ -44,7 +44,7 @@ Out of scope (please file a normal issue instead):
 
 ## Sandbox guarantees
 
-The `execute` tool runs user-supplied TypeScript with two layered defenses:
+The `execute` tool runs user-supplied JavaScript with two layered defenses:
 
 1. **AST preflight** (`acorn` + `acorn-walk`, see `src/sandbox/policy.ts`):
    rejects `import` / `import()` / `eval` / `new Function` and references to
@@ -54,7 +54,8 @@ The `execute` tool runs user-supplied TypeScript with two layered defenses:
    concatenation) is the next layer's job.
 2. **Runtime isolation** — one of:
    - `isolated-vm`: a fresh V8 isolate, **no host references** other than
-     a single Reference to the RPC dispatcher; heap cap, wall-clock cap.
+     a Reference to the RPC dispatcher and a log sink for `console.*`;
+     heap cap, wall-clock cap.
    - `deno run --no-prompt <runner>`: subprocess with **no `--allow-*` flags**,
      so no net/fs/env/ffi/subprocess access; wall-clock cap. The runner is a
      temporary file so stdin stays free for the host RPC channel.

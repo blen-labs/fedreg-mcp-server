@@ -57,6 +57,14 @@
       "example": "await fr.publicInspection.get('2024-99999')"
     },
     {
+      "id": "fr.publicInspection.getMany",
+      "kind": "endpoint",
+      "binding": "fr",
+      "signature": "fr.publicInspection.getMany(documentNumbers, fields?)",
+      "description": "Fetch several public inspection documents by document number in one request.",
+      "example": "await fr.publicInspection.getMany(['2024-99998', '2024-99999'])"
+    },
+    {
       "id": "fr.agencies.list",
       "kind": "endpoint",
       "binding": "fr",

@@ -7,7 +7,7 @@ to do before sending anything non-trivial, and we'll figure it out together.
 ## Ground rules
 
 - The server's whole reason for existing is to be a safe place to run untrusted
-  TypeScript against three public APIs. **Anything that weakens the sandbox is
+  JavaScript against three public APIs. **Anything that weakens the sandbox is
   out of scope.** That includes adding `fetch`, `import`, filesystem, env,
   or subprocess access to the sandbox surface.
 - New SDK methods are welcome but must be paired with field/endpoint entries

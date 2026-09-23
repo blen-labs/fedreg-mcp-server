@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { MockAgent } from 'undici';
 import { buildSdk } from '../src/sdk/bindings.js';
+import { getSources } from '../src/sdk/sources/index.js';
 import { dispatch, type RpcRequest } from '../src/sdk/runtime.js';
 
 const config = {
@@ -109,5 +110,18 @@ describe('RPC method boundary', () => {
       expect(await dispatch(registry, { binding: 'test', path, args: [] }))
         .toMatchObject({ ok: false, error: { name: 'TypeError' } });
     }
+  });
+});
+
+describe('method registry and corpus stay in sync', () => {
+  it.each(getSources(config).map(s => [s.name, s] as const))('%s: every registered method is documented and vice versa', (name, source) => {
+    const registered = Object.keys(source.methods).map(m => `${name}.${m}`).sort();
+    const documented = source.corpus.endpoints.map(e => e.id).filter(id => !id.startsWith(`${name}.recipes.`)).sort();
+    expect(documented).toEqual(registered);
+  });
+
+  it('dispatch test table covers every registered method', () => {
+    const registered = getSources(config).flatMap(s => Object.keys(s.methods).map(m => `${s.name}.${m}`)).sort();
+    expect(reads.map(([id]) => id).sort()).toEqual(registered);
   });
 });

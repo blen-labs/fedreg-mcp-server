@@ -9,6 +9,22 @@
       "example": "await ecfr.admin.agencies()"
     },
     {
+      "id": "ecfr.admin.corrections",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.admin.corrections(query?: { date?, title?, error_corrected_date? })",
+      "description": "List eCFR corrections (editorial fixes to published CFR text), optionally filtered by date, title, or the date the error was corrected.",
+      "example": "await ecfr.admin.corrections({ title: 40 })"
+    },
+    {
+      "id": "ecfr.admin.corrections_for_title",
+      "kind": "endpoint",
+      "binding": "ecfr",
+      "signature": "ecfr.admin.corrections_for_title(title, query?: { date? })",
+      "description": "List eCFR corrections for a single CFR title.",
+      "example": "await ecfr.admin.corrections_for_title(40)"
+    },
+    {
       "id": "ecfr.titles.list",
       "kind": "endpoint",
       "binding": "ecfr",
