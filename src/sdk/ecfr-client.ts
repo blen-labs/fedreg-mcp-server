@@ -49,7 +49,11 @@ export class EcfrClient {
 
   /** Returns XML as a string. Large for whole titles; prefer structure/ancestry first. */
   full = (date: string, title: number, query?: Record<string, string | number>) =>
-    this.http.call<string>({ path: `/versioner/v1/full/${date}/title-${title}.xml`, query, accept: 'xml' });
+    this.http.call<string>({
+      path: `/versioner/v1/full/${date}/title-${title}.xml`, query, accept: 'xml',
+      // eCFR requires compression for its full-text endpoint.
+      headers: { 'accept-encoding': 'gzip' },
+    });
 
   search = {
     results: (params: EcfrSearchParams) =>

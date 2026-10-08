@@ -1,7 +1,11 @@
 import { request, type Dispatcher } from 'undici';
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'node:crypto';
+import { gunzip } from 'node:zlib';
+import { promisify } from 'node:util';
 import { log } from './logger.js';
+
+const decompressGzip = promisify(gunzip);
 
 export interface HttpClientOptions {
   baseUrl: string;
@@ -92,8 +96,15 @@ export class HttpClient {
           ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
         });
 
+        // undici.request returns raw bytes, unlike fetch. Decode before parsing,
+        // reporting upstream errors, or caching the response.
+        const encoding = res.headers['content-encoding'];
+        const decoded = typeof encoding === 'string' && encoding.trim().toLowerCase() === 'gzip'
+          ? new TextDecoder().decode(await decompressGzip(Buffer.from(await res.body.arrayBuffer())))
+          : undefined;
+
         if (res.statusCode >= 400) {
-          const text = await res.body.text();
+          const text = decoded ?? await res.body.text();
           const err = new HttpError(`${method} ${url} -> ${res.statusCode}`, res.statusCode, text);
           if (res.statusCode === 429) {
             const retryAfter = Array.isArray(res.headers['retry-after']) ? res.headers['retry-after'][0] : res.headers['retry-after'];
@@ -104,8 +115,8 @@ export class HttpClient {
         }
 
         let body: unknown;
-        if (accept.startsWith('application/json')) body = await res.body.json();
-        else body = await res.body.text();
+        if (accept.startsWith('application/json')) body = decoded === undefined ? await res.body.json() : JSON.parse(decoded);
+        else body = decoded ?? await res.body.text();
         const headers: Record<string, string> = {};
         for (const [k, v] of Object.entries(res.headers)) headers[k] = Array.isArray(v) ? v.join(',') : String(v ?? '');
         if (key) this.cache.set(key, { status: res.statusCode, body, headers });
