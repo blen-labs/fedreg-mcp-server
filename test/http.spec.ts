@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockAgent } from 'undici';
+import { gzipSync } from 'node:zlib';
 import { IpRateLimiter } from '../src/server/ipRateLimiter.js';
 import { SubjectQuota } from '../src/util/quotas.js';
 import { HttpClient } from '../src/util/httpClient.js';
@@ -94,5 +95,40 @@ describe('HttpClient default headers + 429', () => {
     await c.call({ path: '/v4/c' }); // miss -> takes 1
     await c.call({ path: '/v4/c' }); // hit -> no take
     expect(takes).toBe(1);
+  });
+
+  it('caches decoded gzip XML, not compressed bytes', async () => {
+    const xml = '<SECTION><P>§ 273.24 — café</P></SECTION>';
+    agent.get(ORIGIN).intercept({ path: '/full.xml', method: 'GET' })
+      .reply(200, gzipSync(xml), { headers: { 'content-encoding': 'gzip' } });
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100 });
+    const opts = { path: '/full.xml', accept: 'xml' as const, headers: { 'accept-encoding': 'gzip' } };
+    expect(await c.call(opts)).toBe(xml);
+    expect(await c.call(opts)).toBe(xml);
+  });
+
+  it('parses gzip JSON after decompression', async () => {
+    agent.get(ORIGIN).intercept({ path: '/compressed.json', method: 'GET' })
+      .reply(200, gzipSync(JSON.stringify({ title: '§ 273.24' })), { headers: { 'content-encoding': 'gzip' } });
+    expect(await client().call({ path: '/compressed.json' })).toEqual({ title: '§ 273.24' });
+  });
+
+  it('preserves decoded compressed upstream errors and retry-after', async () => {
+    agent.get(ORIGIN).intercept({ path: '/compressed-error', method: 'GET' })
+      .reply(429, gzipSync('slow down'), { headers: { 'content-encoding': 'gzip', 'retry-after': '7' } });
+    await expect(client({ retry429: false }).call({ path: '/compressed-error' })).rejects.toMatchObject({
+      name: 'RateLimited', status: 429, bodySnippet: 'slow down',
+      message: expect.stringContaining('retry-after 7'),
+    });
+  });
+
+  it('rejects corrupt gzip without caching it', async () => {
+    agent.get(ORIGIN).intercept({ path: '/corrupt.xml', method: 'GET' })
+      .reply(200, 'not gzip', { headers: { 'content-encoding': 'gzip' } });
+    agent.get(ORIGIN).intercept({ path: '/corrupt.xml', method: 'GET' })
+      .reply(200, gzipSync('<TITLE/>'), { headers: { 'content-encoding': 'gzip' } });
+    const c = client({ retries: 0, cacheTtlMs: 60_000, cacheMaxItems: 100 });
+    await expect(c.call({ path: '/corrupt.xml', accept: 'xml' })).rejects.toThrow();
+    expect(await c.call({ path: '/corrupt.xml', accept: 'xml' })).toBe('<TITLE/>');
   });
 });

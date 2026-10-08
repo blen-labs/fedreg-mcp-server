@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockAgent } from 'undici';
+import { gzipSync } from 'node:zlib';
 import { FederalRegisterClient } from '../src/sdk/fr-client.js';
 import { EcfrClient } from '../src/sdk/ecfr-client.js';
 import { HttpClient } from '../src/util/httpClient.js';
@@ -106,5 +107,18 @@ describe('EcfrClient', () => {
     const out = await ecfrClient().full('2024-01-01', 40);
     expect(typeof out).toBe('string');
     expect(out).toContain('<TITLE');
+  });
+
+  it('requests compression and returns decoded section XML with paragraph text intact', async () => {
+    const xml = '<SECTION N="273.24"><HEAD>§ 273.24</HEAD><P>(a) General rule.</P></SECTION>';
+    agent.get(ECFR_ORIGIN).intercept({
+      path: '/api/versioner/v1/full/2026-10-01/title-7.xml?part=273&section=273.24',
+      method: 'GET',
+      headers: { 'accept-encoding': 'gzip', accept: 'application/xml,text/xml' },
+    }).reply(200, gzipSync(xml), {
+      headers: { 'content-type': 'text/xml', 'content-encoding': 'gzip' },
+    });
+
+    expect(await ecfrClient().full('2026-10-01', 7, { part: 273, section: '273.24' })).toBe(xml);
   });
 });
