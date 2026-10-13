@@ -190,6 +190,8 @@ The most common knobs (full list and defaults in [`.env.example`](./.env.example
 | `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-subject regs calls/hour (HTTP mode only; skipped on stdio; one shared `anonymous` bucket under `--insecure`). Must be ≥ 1. |
 | `FEDREG_AUTH_PROVIDER` | `none` | `none` / `embedded` / `generic-oidc` / `clerk` / `workos` / `auth0` |
 | `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (used in OAuth metadata). |
+| `FEDREG_IP_RPS` / `FEDREG_IP_BURST` | `5` / `20` | Per-IP token bucket on the HTTP transport. |
+| `FEDREG_CLIENT_IP_HEADER` | unset | Header your reverse proxy overwrites with the client address (Railway: `x-real-ip`). Required behind a proxy for the per-IP limit to see real clients. |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |
 
 CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--help`.

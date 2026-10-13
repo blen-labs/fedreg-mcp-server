@@ -3,7 +3,7 @@ import { createMcpHandler, type AuthInfo, type McpRequestContext } from '@modelc
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { buildMcpServer, MCP_PROTOCOL_VERSION } from './mcpServer.js';
 import type { CatalogDeps } from './toolCatalog.js';
-import { IpRateLimiter } from './ipRateLimiter.js';
+import { IpRateLimiter, clientIp } from './ipRateLimiter.js';
 import { SubjectQuota } from '../util/quotas.js';
 import { buildVerifier, type AuthConfig } from './authz.js';
 import type { JWTPayload } from 'jose';
@@ -15,6 +15,12 @@ export interface HttpOptions {
   host: string;
   rps: number;
   burst: number;
+  /**
+   * Header a reverse proxy in front of this server overwrites with the client address
+   * (Railway: `x-real-ip`). Unset keys the per-IP limit on the TCP peer, which behind a
+   * proxy is the proxy, not the client.
+   */
+  clientIpHeader?: string;
   subjectDailyQuota: number;
   auth: AuthConfig;
   insecure?: boolean;
@@ -113,7 +119,7 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     try {
-      const ip = (req.socket.remoteAddress ?? 'unknown').replace('::ffff:', '');
+      const ip = clientIp(req, opts.clientIpHeader);
       if (!limiter.allow(ip)) return reply(res, 429, { error: 'rate_limited' });
 
       // DNS rebinding protection: validate Host header against allowlist when provided.

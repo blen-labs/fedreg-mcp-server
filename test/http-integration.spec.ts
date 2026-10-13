@@ -440,3 +440,35 @@ describe('Origin validation (MCP spec MUST — DNS rebinding / CSRF)', () => {
     });
   });
 });
+
+describe('per-IP rate limit behind a reverse proxy', () => {
+  async function server(clientIpHeader?: string) {
+    const sources = { frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+      regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0 };
+    const h = await startHttp({ sdk: buildSdk(sources), sandbox: await pickSandbox('auto'), corpus: buildCorpus(getSources(sources)),
+      regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) }, {
+      host: '127.0.0.1', port: 0, rps: 0.001, burst: 2, subjectDailyQuota: 1_000_000,
+      ...(clientIpHeader ? { clientIpHeader } : {}),
+      insecure: true, auth: { provider: 'none' }, publicOrigin: 'http://127.0.0.1',
+    });
+    const status = async (realIp?: string) =>
+      (await fetch(`http://127.0.0.1:${h.port}/health`, realIp ? { headers: { 'x-real-ip': realIp } } : {})).status;
+    return { h, status };
+  }
+
+  it('limits each client separately by the header the proxy sets', async () => {
+    const { h, status } = await server('x-real-ip');
+    try {
+      expect([await status('203.0.113.7'), await status('203.0.113.7'), await status('203.0.113.7')]).toEqual([200, 200, 429]);
+      // Another client behind the same proxy has its own bucket.
+      expect(await status('198.51.100.9')).toBe(200);
+    } finally { await h.close(); }
+  });
+
+  it('ignores the header when none is trusted', async () => {
+    const { h, status } = await server();
+    try {
+      expect([await status('203.0.113.1'), await status('203.0.113.2'), await status('203.0.113.3')]).toEqual([200, 200, 429]);
+    } finally { await h.close(); }
+  });
+});

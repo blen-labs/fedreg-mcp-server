@@ -191,7 +191,11 @@ The HTTP transport also enforces:
 - **DNS rebinding protection** — `FEDREG_ALLOWED_HOSTS` allowlist on the
   Host header.
 - **Per-IP rate limit** — token bucket with `FEDREG_IP_RPS` sustained rate
-  and `FEDREG_IP_BURST` burst.
+  and `FEDREG_IP_BURST` burst, keyed on the TCP peer. Behind a reverse proxy,
+  set `FEDREG_CLIENT_IP_HEADER` to the header the proxy overwrites with the
+  client address (Railway: `x-real-ip`; its `X-Forwarded-For` ends with the
+  edge's address, not the client's). Idle buckets expire once refilled, and
+  at most 50,000 are kept.
 - **Per-subject daily quota** — `FEDREG_SUBJECT_DAILY_QUOTA` requests per
   authenticated subject per UTC day. Auth runs on every request (there is no
   session in which an identity could persist), so both this quota and the
