@@ -20,6 +20,10 @@ export function createAuth(config: AccountConfig, store: Store) {
     trustedOrigins: [config.origin],
     logger: { disabled: true },
     advanced: { useSecureCookies: config.production },
+    // Better Auth enables its limiter only when NODE_ENV is exactly 'production', but an unset
+    // NODE_ENV is production here. The app exempts OAuth registration and token endpoints from
+    // its own IP limit on the strength of these limits, so tie them to the same flag.
+    rateLimit: { enabled: config.production },
     session: { expiresIn: 7 * 86400, cookieCache: { enabled: false } },
     account: { encryptOAuthTokens: true, accountLinking: { enabled: false } },
     emailAndPassword: { enabled: false },

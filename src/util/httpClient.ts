@@ -20,12 +20,18 @@ export interface HttpClientOptions {
   retry429?: boolean;
   /** Longest a 429's Retry-After may delay a retry or pause the gate. Default 5000. */
   maxRetryAfterMs?: number;
-  preflightLimiter?: { tryTake(): boolean; secondsUntilNext?(): number };
+  preflightLimiter?: PreflightLimiter;
   /** Shared per-upstream admission control (see UpstreamGate). */
   gate?: UpstreamGateLike;
   /** Human name of the upstream, used in error messages and logs, e.g. 'Federal Register API'. */
   label?: string;
 }
+
+/**
+ * Admission check run after the cache and in-flight dedupe, once per upstream request (not per
+ * retry). May be async, e.g. account mode's per-account limit kept in PostgreSQL.
+ */
+export interface PreflightLimiter { tryTake(): boolean | Promise<boolean>; secondsUntilNext?(): number }
 
 /** What HttpClient needs from an UpstreamGate; injectable for tests. */
 export interface UpstreamGateLike { acquire(): Promise<() => void>; pause(ms: number): void }
@@ -50,7 +56,7 @@ export class HttpClient {
   private readonly retry429: boolean;
   private readonly maxRetryAfterMs: number;
   private readonly dispatcher?: Dispatcher;
-  private readonly preflightLimiter?: { tryTake(): boolean; secondsUntilNext?(): number };
+  private readonly preflightLimiter?: PreflightLimiter;
   private readonly gate?: UpstreamGateLike;
   private readonly label: string;
   /** Identical GETs already on the wire; later callers share the first one's result. */
@@ -99,7 +105,7 @@ export class HttpClient {
       : o.accept === 'text' ? 'text/plain'
       : 'application/json';
 
-    if (this.preflightLimiter && !this.preflightLimiter.tryTake()) {
+    if (this.preflightLimiter && !(await this.preflightLimiter.tryTake())) {
       const wait = this.preflightLimiter.secondsUntilNext?.() ?? 0;
       const err = new HttpError(`${method} ${url} -> upstream rate limit reached${Number.isFinite(wait) && wait > 0 ? ` (retry in ~${wait}s)` : ''}`, 429, '');
       err.name = 'RegsRateLimited';

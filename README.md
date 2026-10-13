@@ -3,7 +3,7 @@
 [![CI](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@blen/fedreg-mcp-server.svg)](https://www.npmjs.com/package/@blen/fedreg-mcp-server)
 [![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520.10-339933.svg)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520.19-339933.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-7c3aed.svg)](https://modelcontextprotocol.io/specification/2026-07-28)
 
 <p align="center">
@@ -129,7 +129,7 @@ Restart Claude Desktop, then just ask in plain language:
 > *"What does 40 CFR Part 60 cover?"*
 > *"Which proposed rules opened for public comment this week?"*
 
-Requires **Node.js ≥ 20.10**. `npx` downloads and runs the server on demand; no global install needed. If the `execute` tool reports `SandboxUnavailable`, see [Sandbox runtimes](#sandbox-runtimes).
+Requires **Node.js ≥ 20.19**. `npx` downloads and runs the server on demand; no global install needed. If the `execute` tool reports `SandboxUnavailable`, see [Sandbox runtimes](#sandbox-runtimes).
 
 ## How it works
 

@@ -15,6 +15,8 @@ import type { AccountConfig } from './config.js';
 /** Account-scoped regs clients, reused across executes so their response caches survive. */
 const ACCOUNT_CLIENT_MAX = 500;
 const ACCOUNT_CLIENT_TTL_MS = 60 * 60 * 1000;
+/** Per-account response cache cap: up to ACCOUNT_CLIENT_MAX of these caches live at once. */
+const ACCOUNT_CACHE_MAX_ITEMS = 200;
 
 const unavailable = (message: string) => Object.assign(new Error(message), { name: 'SourceUnavailable' });
 
@@ -46,7 +48,10 @@ export function accountDependencies(deps: CatalogDeps, cfg: SupervisorConfig, st
         // Account credentials can never be redirected by an operator's legacy upstream override.
         regsBaseUrl: 'https://api.regulations.gov', regsApiKey: key,
         userAgent: cfg.userAgent, timeoutMs: cfg.upstreamTimeoutMs, retries: 0,
-        cacheTtlMs: cfg.cacheTtlMs, cacheMaxItems: cfg.cacheMaxItems,
+        cacheTtlMs: cfg.cacheTtlMs, cacheMaxItems: Math.min(cfg.cacheMaxItems, ACCOUNT_CACHE_MAX_ITEMS),
+        // The hourly account limit runs after the client's cache and in-flight dedupe, like the
+        // process-wide bucket in key mode, so repeated identical calls do not spend the quota.
+        regsPreflightLimiter: { tryTake: () => store.allow(`regs:${owner}`, cfg.regsRatePerHour, 3600) },
         ...(dispatcher ? { dispatcher } : {}),
       });
       sources.set(id, regs);
@@ -72,8 +77,6 @@ export function accountDependencies(deps: CatalogDeps, cfg: SupervisorConfig, st
         const key = await loadKey();
         if (!key) throw unavailable('Save a regulations.gov API key in your account at /account.');
         const method = sourceFor(owner, key).methods[name]!;
-        if (!await store.allow(`regs:${owner}`, cfg.regsRatePerHour, 3600))
-          throw Object.assign(new Error('Regulations.gov hourly account limit reached'), { name: 'RegsRateLimited' });
         const redact = (text: string) => text.split(key).join('[REDACTED]');
         let value: unknown;
         try {
@@ -90,7 +93,7 @@ export function accountDependencies(deps: CatalogDeps, cfg: SupervisorConfig, st
         }
         // Defensive redaction if an upstream ever echoes a credential, including object keys.
         const json = JSON.stringify(value);
-        return json === undefined ? value : JSON.parse(redact(json));
+        return json?.includes(key) ? JSON.parse(redact(json)) : value;
       }]));
       return { ...sdk, methods: Object.freeze({ ...sdk.methods, regs: Object.freeze(accountMethods) }) };
     },

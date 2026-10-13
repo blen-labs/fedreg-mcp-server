@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Run everything from this directory (`pnpm@10.33.0` pinned via `packageManager`; Node >= 20.10):
+Run everything from this directory (`pnpm@10.33.0` pinned via `packageManager`; Node >= 20.19):
 
 ```bash
 pnpm install

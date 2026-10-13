@@ -105,6 +105,19 @@ describe('HttpClient default headers + 429', () => {
     expect(takes).toBe(1);
   });
 
+  it('awaits an async preflight limiter: a denial blocks the request, cache hits skip it', async () => {
+    let takes = 0;
+    let allow = true;
+    const limiter = { tryTake: async () => { takes++; return allow; } };
+    agent.get(ORIGIN).intercept({ path: '/v4/a', method: 'GET' }).reply(200, { n: 1 }); // ONE interceptor
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100, preflightLimiter: limiter });
+    await expect(c.call({ path: '/v4/a' })).resolves.toEqual({ n: 1 });
+    await expect(c.call({ path: '/v4/a' })).resolves.toEqual({ n: 1 }); // cache hit, no take
+    allow = false;
+    await expect(c.call({ path: '/v4/other' })).rejects.toMatchObject({ name: 'RegsRateLimited', status: 429 });
+    expect(takes).toBe(2);
+  });
+
   it('caches decoded gzip XML, not compressed bytes', async () => {
     const xml = '<SECTION><P>§ 273.24 — café</P></SECTION>';
     agent.get(ORIGIN).intercept({ path: '/full.xml', method: 'GET' })

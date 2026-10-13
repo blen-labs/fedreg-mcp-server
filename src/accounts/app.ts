@@ -28,6 +28,9 @@ const CORS_HEADERS = {
 const CORS_ALLOW_HEADERS =
   'Authorization, Content-Type, Accept, Mcp-Protocol-Version, Mcp-Session-Id, Mcp-Method, Mcp-Name, Last-Event-ID';
 
+/** Longest a token or revoke request waits for a lock connection, and then for the lock. */
+const LOCK_WAIT_MS = 10_000;
+
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 /** Redirect URIs in a registration body; malformed JSON is left for Better Auth to reject. */
 function registeredRedirects(body: Buffer): unknown {
@@ -65,7 +68,7 @@ export async function createAccountApp(
   const auth = createAuth(config, store);
   await initializeAuth(auth, config, store);
   // Each waiting token request holds a connection, so size this for concurrent token requests.
-  const locks = new Pool({ ...store.pool.options, max: 10 });
+  const locks = new Pool({ ...store.pool.options, max: 10, connectionTimeoutMillis: LOCK_WAIT_MS });
   locks.on('error', () => log.error('account.auth_lock_connection_error'));
   /**
    * The advisory lock for a /oauth2/token or /oauth2/revoke body: the owner of the presented
@@ -98,6 +101,7 @@ export async function createAccountApp(
   const foreignOrigin = (req: express.Request) =>
     !!req.headers.origin && req.headers.origin !== config.origin;
   const metadataUrl = `${config.origin}/.well-known/oauth-protected-resource/mcp`;
+  const originHost = new URL(config.origin).host;
   app.use((req, res, next) => {
     res.set({
       'Cache-Control': 'no-store',
@@ -108,7 +112,7 @@ export async function createAccountApp(
         "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
     });
     if (config.production) res.set('Strict-Transport-Security', 'max-age=31536000');
-    if (req.path !== '/health' && req.headers.host !== new URL(config.origin).host)
+    if (req.path !== '/health' && req.headers.host !== originHost)
       return res.status(421).send('Invalid host');
     // MCP clients, including browser-based ones and hosted connectors such as Claude, call
     // discovery, registration, token and /mcp from other origins. These use bearer tokens or
@@ -146,8 +150,11 @@ export async function createAccountApp(
   });
   const webRoot = fileURLToPath(new URL('../../dist/web/', import.meta.url));
   app.use('/assets', express.static(resolve(webRoot, 'assets'), { immutable: true, maxAge: '1y', index: false }));
+  // Production reads the built page once; development rereads it so `pnpm dev:web` rebuilds show.
+  const loadIndex = () => readFile(resolve(webRoot, 'index.html'), 'utf8').catch(() => undefined);
+  let indexHtml: string | undefined;
   app.get(['/', '/sign-in', '/connect', '/consent', '/account', '/privacy-policy', '/terms'], async (_req, res) => {
-    const html = await readFile(resolve(webRoot, 'index.html'), 'utf8').catch(() => undefined);
+    const html = config.production ? (indexHtml ??= await loadIndex()) : await loadIndex();
     if (!html) return res.status(503).send('The web interface is not built. Run pnpm build.');
     res.set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
       .type('html').send(html);
@@ -310,21 +317,25 @@ export async function createAccountApp(
       // authorization is revoked and the user authorizes again.
       const lockId = await tokenLockId(Buffer.isBuffer(body) ? body : undefined);
       const lock = await locks.connect();
+      // A transaction-scoped lock is released by COMMIT or ROLLBACK, and a bounded wait keeps one
+      // stuck request from holding every lock connection and queueing all users' token requests.
+      let broken = false;
       try {
-        await lock.query('SELECT pg_advisory_lock($1)', [lockId]);
+        await lock.query('BEGIN');
+        await lock.query(`SET LOCAL lock_timeout = '${LOCK_WAIT_MS}ms'`);
+        await lock.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
         await execute();
+        await lock.query('COMMIT');
+      } catch (error) {
+        // A connection that cannot roll back may still hold the lock; discard it.
+        await lock.query('ROLLBACK').catch(() => { broken = true; });
+        throw error;
       } finally {
-        try {
-          await lock.query('SELECT pg_advisory_unlock($1)', [lockId]);
-        } catch {
-          lock.release(true);
-          throw new Error('OAuth lock connection failed');
-        }
-        lock.release();
+        lock.release(broken);
       }
     },
   );
-  installPortal(app, config, store, auth, fetcher);
+  installPortal(app, config, store, auth, fetcher, ipOf);
   app.use((_req, res) => res.status(404).send('Not found'));
   app.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

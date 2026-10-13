@@ -42,13 +42,6 @@ export class Store {
     }
   }
   async saveKey(owner: string, key: string, actor?: string) {
-    return this.persistKey(owner, key, actor);
-  }
-  private async persistKey(
-    owner: string,
-    key: string,
-    actor: string | undefined,
-  ) {
     const ciphertext = this.keyring.seal(key, `regulations.gov:${owner}`);
     return this.changeKey(
       owner,

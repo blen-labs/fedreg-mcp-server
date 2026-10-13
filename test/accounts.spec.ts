@@ -26,6 +26,9 @@ it('encrypts keys with random nonces and binds ciphertext to its account and pur
   expect(() => ring.open(sealed, 'regulations.gov:user:b')).toThrow();
   expect(() => ring.open(sealed, 'oauth:user:a')).toThrow();
   expect(() => ring.open({ ...sealed, data: 'AAAA' }, 'regulations.gov:user:a')).toThrow();
+  // A truncated (still valid-prefix) tag must not be accepted.
+  const shortTag = Buffer.from(sealed.tag, 'base64').subarray(0, 4).toString('base64');
+  expect(() => ring.open({ ...sealed, tag: shortTag }, 'regulations.gov:user:a')).toThrow();
   expect(new Keyring('next', keys).open(sealed, 'regulations.gov:user:a')).toBe('secret');
 });
 

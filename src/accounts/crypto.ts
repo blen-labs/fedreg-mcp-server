@@ -8,6 +8,8 @@ export interface Sealed {
   data: string;
 }
 
+const TAG_BYTES = 16;
+
 /** AEAD binds each ciphertext to its purpose and owner, preventing row swapping. */
 export class Keyring {
   constructor(
@@ -20,7 +22,7 @@ export class Keyring {
   }
   seal(value: string, context: string): Sealed {
     const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.keys[this.activeId]!, iv);
+    const cipher = createCipheriv('aes-256-gcm', this.keys[this.activeId]!, iv, { authTagLength: TAG_BYTES });
     cipher.setAAD(Buffer.from(JSON.stringify([1, this.activeId, context])));
     const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
     return {
@@ -34,7 +36,8 @@ export class Keyring {
   open(value: Sealed, context: string): string {
     const key = Object.hasOwn(this.keys, value.kid) ? this.keys[value.kid] : undefined;
     if (value.v !== 1 || !key) throw new Error('Unsupported ciphertext');
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(value.iv, 'base64'));
+    // A fixed tag length: GCM otherwise accepts truncated tags as short as 4 bytes.
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(value.iv, 'base64'), { authTagLength: TAG_BYTES });
     decipher.setAAD(Buffer.from(JSON.stringify([1, value.kid, context])));
     decipher.setAuthTag(Buffer.from(value.tag, 'base64'));
     return Buffer.concat([
