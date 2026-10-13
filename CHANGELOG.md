@@ -15,6 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+
+## [2.0.10] - 2026-10-13
+
+### Fixed
+- key the per-IP rate limit on the real client behind proxies (#8) (http)
 ## [2.0.9] - 2026-10-08
 
 ### Fixed
@@ -190,7 +195,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.9...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.10...HEAD
+[2.0.10]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.9...v2.0.10
 [2.0.9]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.8...v2.0.9
 [2.0.8]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.7...v2.0.8
 [2.0.7]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.6...v2.0.7
