@@ -164,7 +164,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     server = createServer();
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     config = { origin: `http://127.0.0.1:${(server.address() as any).port}`, production: false,
-      databaseUrl: database!, authSecret: randomToken(), googleClientId: 'fixture-google', googleClientSecret: 'fixture-secret', keyring: new Keyring('v1', { v1: randomBytes(32) }) };
+      databaseUrl: database!, authSecret: randomToken(), googleClientId: 'fixture-google', googleClientSecret: 'fixture-secret', keyring: new Keyring('v1', { v1: randomBytes(32) }),
+      clientIpHeader: 'x-real-ip' };
     const deps = await buildSupervisor(cfg);
     expect(await deps.sandbox.available(), 'Deno is required for account integration tests').toBe(true);
     // Upstream regulations.gov calls go through an injected MockAgent, never the global dispatcher.
@@ -249,6 +250,14 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect((await send(browser, '/api/portal/keys', { apiKey: 'z'.repeat(40) })).status).toBe(400);
     validationStatus = 200;
     expect(await store.getKey(personalOwner(alice.id))).toBe(key);
+  });
+  it('keys per-IP limits on the trusted client header, not the proxy address', async () => {
+    const bucket = async (key: string) => (await pool.query('SELECT count FROM request_limits WHERE bucket=$1', [digest(key)])).rows[0]?.count;
+    for (const ip of ['203.0.113.5', '203.0.113.5', '198.51.100.7'])
+      expect((await fetch(`${config.origin}/mcp`, { method: 'POST', headers: { authorization: 'Bearer nope', 'x-real-ip': ip } })).status).toBe(401);
+    // On Railway, req.ip would be the shared edge address; each client gets its own bucket instead.
+    expect(await bucket('mcp-ip:203.0.113.5')).toBe(2);
+    expect(await bucket('mcp-ip:198.51.100.7')).toBe(1);
   });
   it('enforces consent denial, signed queries, and PKCE', async () => {
     expect((await send(browser, '/api/portal/consent', { oauth_query: 'client_id=attacker', accept: true })).status).toBe(400);

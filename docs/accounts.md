@@ -71,7 +71,12 @@ hosting or a different proxy chain needs a corresponding trust-proxy review.
   `FEDREG_SUBJECT_DAILY_QUOTA` also caps MCP requests per account per UTC day.
   The per-execution call budget also applies; `FEDREG_REGS_SUBJECT_RATE_PER_HOUR`
   is ignored in account mode. Browser, key-validation, and OAuth endpoints have
-  separate rate limits.
+  separate rate limits. Per-IP limits here are fixed (600/min per IP for browser
+  traffic, 6000/min per IP on `/mcp` before the per-user limit) and ignore
+  `FEDREG_IP_RPS`/`FEDREG_IP_BURST`. Behind a proxy, set `FEDREG_CLIENT_IP_HEADER`
+  (Railway: `x-real-ip`): with it unset, Express's `trust proxy` takes the
+  rightmost `X-Forwarded-For` entry, which on Railway is its edge, so many users
+  would share one bucket, including Better Auth's OAuth limits.
 - Browser state-changing requests require same-origin JSON; cookies are HttpOnly
   and SameSite, with Secure enabled in production. Responses are non-cacheable.
 - Audit rows record owner, actor, action, and timestamp, not API-key material.

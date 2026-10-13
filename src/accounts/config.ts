@@ -9,6 +9,8 @@ export interface AccountConfig {
   googleClientSecret: string;
   keyring: Keyring;
   subjectDailyQuota?: number;
+  /** Header the reverse proxy overwrites with the client address (Railway: x-real-ip). */
+  clientIpHeader?: string;
 }
 
 /** `env` is passed in by src/bin.ts, the only module that reads process.env. */
@@ -38,8 +40,10 @@ export function loadAccountConfig(env: Record<string, string | undefined>): Acco
   }));
   const subjectDailyQuota = Number(env.FEDREG_SUBJECT_DAILY_QUOTA ?? 10000);
   if (!Number.isInteger(subjectDailyQuota) || subjectDailyQuota < 1) throw new Error('FEDREG_SUBJECT_DAILY_QUOTA must be a positive integer');
+  const clientIpHeader = env.FEDREG_CLIENT_IP_HEADER?.trim().toLowerCase() || undefined;
+  if (clientIpHeader && !/^[a-z0-9-]+$/.test(clientIpHeader)) throw new Error('FEDREG_CLIENT_IP_HEADER must be a header name');
   return {
-    subjectDailyQuota,
+    subjectDailyQuota, clientIpHeader,
     origin: origin.origin, production, authSecret,
     databaseUrl: required('DATABASE_URL'),
     googleClientId: required('GOOGLE_CLIENT_ID'),

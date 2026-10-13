@@ -10,6 +10,7 @@ import { createAuth, initializeAuth, type Auth } from './provider.js';
 import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
 import { log } from '../util/logger.js';
+import { clientIp } from '../server/ipRateLimiter.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -57,6 +58,10 @@ export async function createAccountApp(
   app.disable('x-powered-by');
   // Railway terminates TLS at one trusted proxy hop.
   if (config.production) app.set('trust proxy', 1);
+  // With `trust proxy` 1, req.ip is the rightmost X-Forwarded-For entry. Railway rebuilds that
+  // header as "<client>, <edge>", so req.ip is its edge, shared by many users. The header the
+  // proxy overwrites with the client address (Railway: x-real-ip) is used instead when set.
+  const ipOf = (req: express.Request) => config.clientIpHeader ? clientIp(req, config.clientIpHeader) : req.ip;
   const auth = createAuth(config, store);
   await initializeAuth(auth, config, store);
   // Each waiting token request holds a connection, so size this for concurrent token requests.
@@ -156,7 +161,7 @@ export async function createAccountApp(
     const platform =
       CROSS_ORIGIN_PATHS.test(req.path) &&
       (req.path !== '/mcp' || !!req.headers.authorization?.startsWith('Bearer '));
-    if (!platform && !(await store.allow(`http:${req.ip}`, 600, 60))) return tooMany(res);
+    if (!platform && !(await store.allow(`http:${ipOf(req)}`, 600, 60))) return tooMany(res);
     next();
   });
   const mcpNode = toNodeHandler(mcp, {
@@ -177,7 +182,7 @@ export async function createAccountApp(
     if (!authorization?.startsWith('Bearer ') || authorization.length > 4096)
       return challenge(401, 'invalid_token');
     // A flood guard sized for a connector's shared IP; the per-user limit below does the real work.
-    if (!(await store.allow(`mcp-ip:${req.ip}`, 6000, 60))) return tooMany(res);
+    if (!(await store.allow(`mcp-ip:${ipOf(req)}`, 6000, 60))) return tooMany(res);
     const value = authorization.slice(7);
     // Opaque tokens are checked against their hashed database row on every request, so
     // revocation, client disabling, user deletion and loss of email verification apply immediately.
@@ -240,7 +245,8 @@ export async function createAccountApp(
       const headers = new Headers();
       for (const [name, value] of Object.entries(req.headers))
         if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
-      if (req.ip) headers.set('x-forwarded-for', req.ip);
+      const ip = ipOf(req);
+      if (ip) headers.set('x-forwarded-for', ip);
       else headers.delete('x-forwarded-for');
       const authUrl = new URL(req.originalUrl, config.origin);
       // WHATWG Request normalizes dot segments and backslashes. Reject aliases

@@ -4,6 +4,7 @@ import { verifyOAuthQueryParams } from '@better-auth/oauth-provider';
 import type { AccountConfig } from './config.js';
 import { personalOwner, type Store } from './store.js';
 import type { Auth } from './provider.js';
+import { clientIp } from '../server/ipRateLimiter.js';
 
 /** Keys go only to this fixed upstream; no URL, owner or user ID comes from the form. */
 export async function checkKey(key: unknown, fetcher: typeof fetch = fetch): Promise<string | undefined> {
@@ -58,7 +59,8 @@ export function installPortal(app: Express, config: AccountConfig, store: Store,
     headers.set('content-type', 'application/json');
     headers.set('accept', 'application/json');
     // Forward only the client address trusted by Express, not a caller's spoofed chain.
-    if (req.ip) headers.set('x-forwarded-for', req.ip);
+    const ip = config.clientIpHeader ? clientIp(req, config.clientIpHeader) : req.ip;
+    if (ip) headers.set('x-forwarded-for', ip);
     else headers.delete('x-forwarded-for');
     const response = await auth.handler(new globalThis.Request(`${config.origin}/api/auth${path}`, {
       method: 'POST', headers, body: JSON.stringify(body),
