@@ -24,7 +24,10 @@ export async function api<T>(path: string, body?: object): Promise<T> {
 export interface Config {
   google: boolean;
   email: boolean;
+  /** Signed-in endpoint: OAuth, regulations.gov with the user's own key. */
   mcpUrl: string;
+  /** Anonymous endpoint: Federal Register and eCFR, no sign-in. */
+  publicMcpUrl?: string;
 }
 export interface Keys {
   email: string;

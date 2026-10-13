@@ -8,6 +8,7 @@ import { log } from '../util/logger.js';
 import { createRegsSource } from '../sdk/sources/regs.js';
 import { LRUCache } from 'lru-cache';
 import { createAccountApp } from './app.js';
+import { ACCOUNT_MCP_PATH } from './paths.js';
 import { digest } from './crypto.js';
 import { Store, personalOwner } from './store.js';
 import type { AccountConfig } from './config.js';
@@ -100,6 +101,17 @@ export function accountDependencies(deps: CatalogDeps, cfg: SupervisorConfig, st
   };
 }
 
+/**
+ * The anonymous endpoint's catalog: Federal Register and eCFR, plus regulations.gov through the
+ * operator's shared key (FEDREG_REGS_API_KEY) when one is set. Without it, regs calls explain
+ * how to connect the signed-in endpoint instead.
+ */
+export function publicDependencies(deps: CatalogDeps, origin: string): CatalogDeps {
+  if (deps.sdk.methods.regs) return deps;
+  const disabledReason = `regulations.gov needs your own API key. Connect ${origin}${ACCOUNT_MCP_PATH} instead: sign in with Google and add your key.`;
+  return { ...deps, sdk: { ...deps.sdk, meta: deps.sdk.meta.map(m => m.name === 'regs' ? { ...m, enabled: false, disabledReason } : m) } };
+}
+
 export async function startAccountHttp(deps: CatalogDeps, cfg: SupervisorConfig, config: AccountConfig, port: number, host: string): Promise<HttpHandle> {
   const pool = new Pool({ connectionString: config.databaseUrl, max: 10 });
   pool.on('error', () => log.error('account.database_error'));
@@ -107,7 +119,7 @@ export async function startAccountHttp(deps: CatalogDeps, cfg: SupervisorConfig,
   let service: Awaited<ReturnType<typeof createAccountApp>> | undefined;
   try {
     await store.initialize();
-    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store));
+    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store), fetch, publicDependencies(deps, config.origin));
     const server = createServer(service.app);
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
     const cleanup = setInterval(() => { void store.cleanup().catch(() => log.error('account.cleanup_failed')); }, 60_000);

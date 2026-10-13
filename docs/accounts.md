@@ -11,7 +11,18 @@ The server checks the key against the regulations.gov documents endpoint before
 replacing an existing key. The account page only returns connection status, never
 the stored key. Users can replace or remove it at any time.
 
-An MCP client connects to `/mcp`, discovers the authorization server, registers
+Account mode serves two MCP endpoints, because MCP clients only start OAuth when
+an endpoint answers 401:
+
+| URL | Sign-in | Federal Register, eCFR | regulations.gov |
+| --- | --- | --- | --- |
+| `/mcp` | none | yes | the operator's shared `FEDREG_REGS_API_KEY` if set, otherwise a `SourceUnavailable` error naming `/mcp/account` |
+| `/mcp/account` | Google, OAuth/PKCE | yes | the user's own saved key |
+
+`/mcp` ignores any bearer token and is limited per client IP with `FEDREG_IP_RPS`
+and `FEDREG_IP_BURST` (in memory per replica, like the base transport).
+
+An MCP client connects to `/mcp/account`, discovers the authorization server, registers
 with DCR or CIMD, and uses authorization code + S256 PKCE. After sign-in, a separate Connect page lets the user check and save a key or
 continue without one for Federal Register and eCFR. The Authorize page then shows
 the client and callback destination and offers Allow/Cancel, with a link back to
@@ -61,8 +72,8 @@ hosting or a different proxy chain needs a corresponding trust-proxy review.
   `regs`; Federal Register and eCFR calls never read it. Replacement or deletion
   affects the next execution; a request already in flight may finish with the
   previous key.
-- The account transport never falls back to `FEDREG_REGS_API_KEY`. That setting
-  remains available for stdio and legacy HTTP modes. Account credentials go only
+- Signed-in calls at `/mcp/account` never fall back to `FEDREG_REGS_API_KEY`;
+  that key only serves the anonymous `/mcp` endpoint (and stdio and legacy HTTP). Account credentials go only
   to `https://api.regulations.gov`; legacy upstream overrides cannot change this.
 - Public-source caches stay shared. Each process caches regulations.gov clients
   (and their response caches) by account and key, so a new key gets a fresh cache.
@@ -72,7 +83,7 @@ hosting or a different proxy chain needs a corresponding trust-proxy review.
   The per-execution call budget also applies; `FEDREG_REGS_SUBJECT_RATE_PER_HOUR`
   is ignored in account mode. Browser, key-validation, and OAuth endpoints have
   separate rate limits. Per-IP limits here are fixed (600/min per IP for browser
-  traffic, 6000/min per IP on `/mcp` before the per-user limit) and ignore
+  traffic, 6000/min per IP on `/mcp/account` before the per-user limit) and ignore
   `FEDREG_IP_RPS`/`FEDREG_IP_BURST`. Behind a proxy, set `FEDREG_CLIENT_IP_HEADER`
   (Railway: `x-real-ip`): with it unset, Express's `trust proxy` takes the
   rightmost `X-Forwarded-For` entry, which on Railway is its edge, so many users
@@ -105,5 +116,6 @@ checks do **not** establish live Google sign-in or hosted-client interoperabilit
 Before enabling account mode on the hosted endpoint, configure its own Google
 credentials, public callback, database, and encryption secrets. Verify Google
 sign-in, a real user-provided API key, and the target MCP client's complete OAuth
-flow in the deployed environment. Existing anonymous clients will need to
-reconnect with OAuth. This feature does not enable or deploy itself.
+flow in the deployed environment. Existing clients of `/mcp` keep working without
+sign-in; users who want their own regulations.gov key connect `/mcp/account`.
+This feature does not enable or deploy itself.

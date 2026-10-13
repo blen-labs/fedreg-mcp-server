@@ -11,7 +11,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { Keyring, randomToken, digest } from '../src/accounts/crypto.js';
 import { Store, personalOwner } from '../src/accounts/store.js';
 import { createAccountApp, allowedRedirect } from '../src/accounts/app.js';
-import { accountDependencies } from '../src/accounts/runtime.js';
+import { accountDependencies, publicDependencies } from '../src/accounts/runtime.js';
 import { loadAccountConfig, type AccountConfig } from '../src/accounts/config.js';
 import { checkKey } from '../src/accounts/portal.js';
 import { buildSupervisor, type SupervisorConfig } from '../src/supervisor/index.js';
@@ -53,6 +53,14 @@ it('validates keys only at regulations.gov and preserves safe errors', async () 
   })).toBeUndefined();
   expect(await checkKey(key, async () => new Response(key, { status: 403 }))).toMatch(/preserved/);
   expect(await checkKey(key, async () => { throw new Error(key); })).not.toContain(key);
+});
+
+it('keeps the shared regs key on the anonymous endpoint when one is configured, else points to sign-in', () => {
+  const meta = [{ name: 'regs', label: 'Regulations.gov', enabled: false }];
+  const base = { sdk: { methods: {}, meta, clients: {}, registeredNames: ['regs'], version: () => '0' } } as unknown as Parameters<typeof publicDependencies>[0];
+  expect(publicDependencies(base, 'https://x.example').sdk.meta[0]).toMatchObject({ enabled: false, disabledReason: expect.stringContaining('https://x.example/mcp/account') });
+  const keyed = { ...base, sdk: { ...base.sdk, methods: { regs: {} } } } as typeof base;
+  expect(publicDependencies(keyed, 'https://x.example')).toBe(keyed);
 });
 
 /** Counts key reads, to check that fr/ecfr-only executions never touch the credential store. */
@@ -110,7 +118,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const state = randomToken();
     const query = new URLSearchParams({
       client_id: client.client_id, redirect_uri: client.redirect_uris[0], response_type: 'code',
-      scope: 'fedreg:read offline_access', resource: `${config.origin}/mcp`,
+      scope: 'fedreg:read offline_access', resource: `${config.origin}/mcp/account`,
       code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', state,
     });
     let response = await clientBrowser(`${config.origin}/api/auth/oauth2/authorize?${query}`, {
@@ -149,9 +157,9 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(response.status, await response.clone().text()).toBe(200);
     return { ...await response.json() as any, clientId: a.client.client_id };
   }
-  async function mcp(token: string, code = 'return 42;') {
-    const response = await fetch(`${config.origin}/mcp`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'execute', 'Mcp-Protocol-Version': '2026-07-28' },
+  async function mcp(token: string | undefined, code = 'return 42;', path = '/mcp/account') {
+    const response = await fetch(`${config.origin}${path}`, {
+      method: 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'execute', 'Mcp-Protocol-Version': '2026-07-28' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'execute', arguments: { code }, _meta: {
         'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': { name: 'auth-test', version: '1' }, 'io.modelcontextprotocol/clientCapabilities': {},
       } } }),
@@ -173,7 +181,9 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(await deps.sandbox.available(), 'Deno is required for account integration tests').toBe(true);
     // Upstream regulations.gov calls go through an injected MockAgent, never the global dispatcher.
     mock = new MockAgent(); mock.disableNetConnect();
-    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store, mock), async () => new Response(null, { status: validationStatus }));
+    // The anonymous endpoint gets no shared key here, so regs there must point to sign-in.
+    const publicDeps = publicDependencies(await buildSupervisor({ ...cfg, regsApiKey: undefined }), config.origin);
+    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store, mock), async () => new Response(null, { status: validationStatus }), publicDeps);
     server.on('request', service.app);
     helper = testUtils().init((await service.auth.$context) as unknown as Parameters<ReturnType<typeof testUtils>['init']>[0]).context.test;
     alice = await helper.saveUser(helper.createUser({ email: 'alice@example.test', emailVerified: true }));
@@ -186,9 +196,12 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     if (pool) { await pool.query(`DROP SCHEMA ${schema} CASCADE`); await pool.end(); }
   });
   it('discovers OAuth, challenges anonymous callers, and offers Google sign-in', async () => {
-    const metadata = await fetch(`${config.origin}/.well-known/oauth-protected-resource/mcp`);
+    const metadata = await fetch(`${config.origin}/.well-known/oauth-protected-resource/mcp/account`);
     expect(metadata.status).toBe(200);
-    expect(await metadata.json()).toMatchObject({ resource: `${config.origin}/mcp` });
+    expect(await metadata.json()).toMatchObject({ resource: `${config.origin}/mcp/account` });
+    const challenge = await fetch(`${config.origin}/mcp/account`, { method: 'POST' });
+    expect(challenge.status).toBe(401);
+    expect(challenge.headers.get('www-authenticate')).toContain(`resource_metadata="${config.origin}/.well-known/oauth-protected-resource/mcp/account"`);
     const discovery = await fetch(`${config.origin}/.well-known/oauth-authorization-server`);
     expect(await discovery.json()).toMatchObject({ authorization_endpoint: `${config.origin}/api/auth/oauth2/authorize` });
     expect((await mcp('invalid')).status).toBe(401);
@@ -257,10 +270,23 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   it('keys per-IP limits on the trusted client header, not the proxy address', async () => {
     const bucket = async (key: string) => (await pool.query('SELECT count FROM request_limits WHERE bucket=$1', [digest(key)])).rows[0]?.count;
     for (const ip of ['203.0.113.5', '203.0.113.5', '198.51.100.7'])
-      expect((await fetch(`${config.origin}/mcp`, { method: 'POST', headers: { authorization: 'Bearer nope', 'x-real-ip': ip } })).status).toBe(401);
+      expect((await fetch(`${config.origin}/mcp/account`, { method: 'POST', headers: { authorization: 'Bearer nope', 'x-real-ip': ip } })).status).toBe(401);
     // On Railway, req.ip would be the shared edge address; each client gets its own bucket instead.
     expect(await bucket('mcp-ip:203.0.113.5')).toBe(2);
     expect(await bucket('mcp-ip:198.51.100.7')).toBe(1);
+  });
+  it('serves Federal Register and eCFR at /mcp without sign-in, and points regs to /mcp/account', async () => {
+    const anonymous = await mcp(undefined, 'return 42;', '/mcp');
+    expect(anonymous.status).toBe(200);
+    expect(anonymous.body).toContain('42');
+    // A bearer token is not required, and one sent here is ignored rather than checked.
+    expect((await mcp('not-a-token', 'return 7;', '/mcp')).body).toContain('7');
+    const regs = await mcp(undefined, 'try { await regs.documents.search(); } catch (e) { return `${e.name}: ${e.message}`; }', '/mcp');
+    expect(regs.body).toContain('SourceUnavailable');
+    expect(regs.body).toContain(`${config.origin}/mcp/account`);
+    expect(await (await fetch(`${config.origin}/api/portal/config`)).json()).toMatchObject({
+      mcpUrl: `${config.origin}/mcp/account`, publicMcpUrl: `${config.origin}/mcp`,
+    });
   });
   it('enforces consent denial, signed queries, and PKCE', async () => {
     expect((await send(browser, '/api/portal/consent', { oauth_query: 'client_id=attacker', accept: true })).status).toBe(400);
@@ -322,7 +348,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   it('supports the official MCP client and rejects expired, wrong-resource, under-scoped and disabled-client tokens', async () => {
     const a = await token();
     const client = new Client({ name: 'official-auth-test', version: '1' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`${config.origin}/mcp`), {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${config.origin}/mcp/account`), {
       requestInit: { headers: { Authorization: `Bearer ${a.access_token}` } },
     }));
     expect((await client.listTools()).tools.map(t => t.name)).toEqual(['search_api', 'describe_schema', 'execute']);

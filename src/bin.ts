@@ -70,7 +70,9 @@ async function main(): Promise<void> {
     frBaseUrl: process.env.FEDREG_FR_BASE_URL ?? 'https://www.federalregister.gov/api/v1',
     ecfrBaseUrl: process.env.FEDREG_ECFR_BASE_URL ?? 'https://www.ecfr.gov/api',
     regsBaseUrl: process.env.FEDREG_REGS_BASE_URL ?? 'https://api.regulations.gov',
-    regsApiKey: accounts ? undefined : process.env.FEDREG_REGS_API_KEY,
+    // In account mode the shared key serves only the anonymous /mcp endpoint; signed-in users at
+    // /mcp/account always use their own key (accountDependencies strips this one).
+    regsApiKey: process.env.FEDREG_REGS_API_KEY,
     userAgent: process.env.FEDREG_USER_AGENT ?? 'fedreg-mcp-server/2.0 (+https://github.com/blen-labs/fedreg-mcp-server)',
     upstreamTimeoutMs: Number(process.env.FEDREG_UPSTREAM_TIMEOUT_MS ?? 20_000),
     upstreamRetries: Number(process.env.FEDREG_UPSTREAM_RETRIES ?? 3),
