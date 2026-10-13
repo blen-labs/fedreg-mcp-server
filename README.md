@@ -186,6 +186,10 @@ The most common knobs (full list and defaults in [`.env.example`](./.env.example
 | `FEDREG_REGS_API_KEY` | — | Free key from regulations.gov / api.data.gov. Unset ⇒ `regs` disabled (fr/ecfr unaffected). |
 | `FEDREG_REGS_BASE_URL` | `https://api.regulations.gov` | regulations.gov v4 API base URL. |
 | `FEDREG_REGS_MAX_CALLS_PER_EXECUTE` | `30` | Caps regulations.gov upstream calls per `execute()` run (rate-limit guardrail). |
+| `FEDREG_UPSTREAM_CONCURRENCY` | `8` | Federal Register / eCFR requests in flight, per API, shared by all users. |
+| `FEDREG_UPSTREAM_RATE_PER_SEC` | `10` | Federal Register / eCFR requests started per second, per API, shared by all users. |
+| `FEDREG_UPSTREAM_MAX_WAIT_MS` | `15000` | Longest a call waits for a slot before failing with `RateLimited`. |
+| `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` | `100` | Caps Federal Register + eCFR calls per `execute()` run (`CallBudgetExceeded`). |
 | `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide cap on regs upstream calls/hour (protects the shared key). In-memory; with N replicas, divide by N. Must be ≥ 1. |
 | `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-subject regs calls/hour (HTTP mode only; skipped on stdio; one shared `anonymous` bucket under `--insecure`). Must be ≥ 1. |
 | `FEDREG_AUTH_PROVIDER` | `none` | `none` / `embedded` / `generic-oidc` / `clerk` / `workos` / `auth0` |

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { startStdio } from './server/stdio.js';
 import { startHttp, type HttpHandle } from './server/http.js';
-import { buildSupervisor } from './supervisor/index.js';
+import { buildSupervisor, UPSTREAM_DEFAULTS } from './supervisor/index.js';
+import { PUBLIC_MAX_CALLS_PER_EXECUTE } from './tools/execute.js';
 import type { SandboxKind } from './sandbox/types.js';
 import { log } from './util/logger.js';
 
@@ -55,6 +56,11 @@ function positive(value: string | undefined, fallback: number, min = 0): number 
   return Number.isFinite(n) && n > 0 && n >= min ? n : fallback;
 }
 
+/** A number >= 1 from the environment, or `fallback` when unset or invalid. */
+function atLeastOne(value: string | undefined, fallback: number): number {
+  return positive(value, fallback, 1);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -69,21 +75,20 @@ async function main(): Promise<void> {
     cacheTtlMs: Number(process.env.FEDREG_CACHE_TTL_MS ?? 300_000),
     cacheMaxItems: Number(process.env.FEDREG_CACHE_MAX_ITEMS ?? 2000),
     sandbox: args.sandbox,
+    // Public upstreams (fr, ecfr) see one client: this server. Each must be >= 1.
+    upstreamConcurrency: atLeastOne(process.env.FEDREG_UPSTREAM_CONCURRENCY, UPSTREAM_DEFAULTS.concurrency),
+    upstreamRatePerSec: atLeastOne(process.env.FEDREG_UPSTREAM_RATE_PER_SEC, UPSTREAM_DEFAULTS.ratePerSec),
+    upstreamMaxWaitMs: atLeastOne(process.env.FEDREG_UPSTREAM_MAX_WAIT_MS, UPSTREAM_DEFAULTS.maxWaitMs),
+    publicMaxCallsPerExecute: atLeastOne(process.env.FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE, PUBLIC_MAX_CALLS_PER_EXECUTE),
     regsMaxCallsPerExecute: (() => {
       const n = Number(process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE ?? 30);
       return Number.isFinite(n) && n >= 0 ? n : 30;
     })(),
-    regsRatePerHour: (() => {
-      // Require >= 1: a rate of 0 would silently block ALL regs calls (it is NOT
-      // "unlimited"). To disable regs, leave FEDREG_REGS_API_KEY unset instead.
-      const n = Number(process.env.FEDREG_REGS_RATE_PER_HOUR ?? 1000);
-      return Number.isFinite(n) && n >= 1 ? n : 1000;
-    })(),
-    regsSubjectRatePerHour: (() => {
-      // Require >= 1; per-subject hourly cap, not "unlimited".
-      const n = Number(process.env.FEDREG_REGS_SUBJECT_RATE_PER_HOUR ?? 500);
-      return Number.isFinite(n) && n >= 1 ? n : 500;
-    })(),
+    // Require >= 1: a rate of 0 would silently block ALL regs calls (it is NOT
+    // "unlimited"). To disable regs, leave FEDREG_REGS_API_KEY unset instead.
+    regsRatePerHour: atLeastOne(process.env.FEDREG_REGS_RATE_PER_HOUR, 1000),
+    // Require >= 1; per-subject hourly cap, not "unlimited".
+    regsSubjectRatePerHour: atLeastOne(process.env.FEDREG_REGS_SUBJECT_RATE_PER_HOUR, 500),
   });
 
   let handle: HttpHandle | undefined;
@@ -134,7 +139,7 @@ async function main(): Promise<void> {
     try {
       if (handle) await handle.close();
     } catch (err) {
-      log.warn('shutdown.error', { message: (err as Error).message });
+      log.warn('shutdown.error', { error: (err as Error).message });
     }
     process.exit(0);
   };
@@ -145,6 +150,6 @@ async function main(): Promise<void> {
 type AuthConfigProvider = 'none' | 'embedded' | 'generic-oidc' | 'clerk' | 'workos' | 'auth0';
 
 main().catch(err => {
-  log.error('bin.fatal', { message: (err as Error).message, stack: (err as Error).stack });
+  log.error('bin.fatal', { error: (err as Error).message, stack: (err as Error).stack });
   process.exit(1);
 });

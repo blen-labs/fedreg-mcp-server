@@ -1,5 +1,6 @@
 import type { Dispatcher } from 'undici';
 import type { CorpusEntry } from '../../search/corpus.js';
+import type { UpstreamGateLike } from '../../util/httpClient.js';
 
 export interface SourceMeta {
   name: string;          // sandbox global + RPC binding id
@@ -30,4 +31,7 @@ export interface SourceConfig {
   cacheMaxItems: number;
   dispatcher?: Dispatcher;
   regsPreflightLimiter?: { tryTake(): boolean; secondsUntilNext?(): number };
+  /** Process-wide admission control per public upstream; built once in buildSupervisor. */
+  frGate?: UpstreamGateLike;
+  ecfrGate?: UpstreamGateLike;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { execute } from '../src/tools/execute.js';
+import { execute, PUBLIC_MAX_CALLS_PER_EXECUTE } from '../src/tools/execute.js';
 import { SubjectQuota } from '../src/util/quotas.js';
 import type { SandboxRunner, ExecuteOptions, RpcBridge } from '../src/sandbox/types.js';
 
@@ -83,6 +83,22 @@ describe('per-execute regs budget', () => {
     const regsBlocked = res.value.regs.filter(r => !r.ok && r.error?.name === 'RegsCallBudgetExceeded').length;
     expect(regsOks).toBe(2);
     expect(regsBlocked).toBe(3);
+  });
+});
+
+describe('per-execute fr/ecfr budget', () => {
+  it('rejects fr calls past the cap without touching the regs budget', async () => {
+    const deps = { sdk: mixedSdk, sandbox: fakeMixedRunner(5, 2), regsMaxCallsPerExecute: 2, publicMaxCallsPerExecute: 3, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) };
+    const res = await execute({ code: '', timeoutMs: 1000, memoryMb: 64 }, deps) as { value: { fr: DispatchResult[]; regs: DispatchResult[] } };
+    expect(res.value.fr.filter(r => r.ok).length).toBe(3);
+    expect(res.value.fr.filter(r => !r.ok && r.error?.name === 'CallBudgetExceeded').length).toBe(2);
+    expect(res.value.regs.every(r => r.ok)).toBe(true);
+  });
+
+  it('allows the default budget of fr calls', async () => {
+    const deps = { sdk: mixedSdk, sandbox: fakeMixedRunner(PUBLIC_MAX_CALLS_PER_EXECUTE, 0), regsMaxCallsPerExecute: 2, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) };
+    const res = await execute({ code: '', timeoutMs: 1000, memoryMb: 64 }, deps) as { value: { fr: DispatchResult[] } };
+    expect(res.value.fr.every(r => r.ok)).toBe(true);
   });
 });
 

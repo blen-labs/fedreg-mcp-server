@@ -11,7 +11,7 @@ export async function startStdio(deps: CatalogDeps): Promise<void> {
   // process would log `stdio.ready` and then answer every request with -32603 in silence;
   // the v1 `await server.connect(transport)` at least rejected into `bin.fatal`.
   serveStdio(() => buildMcpServer(deps), {
-    onerror: (err) => log.error('stdio.error', { name: err.name, message: err.message }),
+    onerror: (err) => log.error('stdio.error', { name: err.name, error: err.message }),
   });
   log.info('stdio.ready', { sandbox: deps.sandbox.kind });
 }

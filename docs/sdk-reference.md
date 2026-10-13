@@ -167,8 +167,14 @@ The SDK throws (and the proxy re-throws inside the sandbox) named errors:
   `FEDREG_UPSTREAM_TIMEOUT_MS` (undici's error names are passed through).
 - `SourceUnavailable` — the source is registered but disabled (e.g. `regs.*`
   without `FEDREG_REGS_API_KEY`).
-- `RateLimited` / `RegsRateLimited` — an upstream 429 (never retried for
-  `regs`) / the process-wide hourly regs bucket ran dry.
+- `RateLimited` (status 429) — the named government API is rate
+  limiting this server, or too many calls were already waiting for it
+  (`FEDREG_UPSTREAM_MAX_WAIT_MS`). fr/ecfr 429s are retried once after
+  `Retry-After`; regs 429s are never retried. Slow down or make fewer parallel
+  calls.
+- `RegsRateLimited` — the process-wide hourly regs bucket ran dry.
+- `CallBudgetExceeded` — the per-`execute()` Federal Register + eCFR call
+  budget (`FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE`, default `100`) ran out.
 - `RegsCallBudgetExceeded` — the per-`execute()` regs call budget
   (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`) ran out.
 - `RegsSubjectQuotaExceeded` — the per-subject hourly regs quota ran out.

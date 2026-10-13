@@ -76,6 +76,26 @@ for enabled sources — a call to a disabled
 source returns a `SourceUnavailable` error carrying its `disabledReason`,
 so one missing dependency never takes the others down.
 
+### Federal Register and eCFR: shared upstream gate
+
+Federal Register and eCFR need no key, but they see every user of a hosted
+server as one client: its egress IP. Each public source therefore gets one
+process-wide **upstream gate** (`src/util/upstreamGate.ts`), built once in
+`buildSupervisor` and shared by both source sets:
+
+- **Concurrency and pacing** — at most `FEDREG_UPSTREAM_CONCURRENCY` (default
+  `8`) requests in flight and `FEDREG_UPSTREAM_RATE_PER_SEC` (default `10`)
+  started per second, per API. Calls queue rather than fail; a call still
+  waiting after `FEDREG_UPSTREAM_MAX_WAIT_MS` (default `15000`) fails with
+  `RateLimited`. Cache hits and joined in-flight requests skip the gate.
+- **429 back-off** — an upstream 429 pauses the gate for its `Retry-After`
+  (capped at 5s; 1s without one) and is retried once. Errors name the API.
+- **In-flight sharing** — identical GETs already on the wire share one request.
+- **Per-execute budget** — `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` (default
+  `100`) fr + ecfr calls per `execute()` run (`CallBudgetExceeded`).
+
+Like the regs bucket, the gate is in-memory: N replicas allow N× the rate.
+
 ### regulations.gov: key handling and degradation
 
 regulations.gov requires a free API key (`FEDREG_REGS_API_KEY`). It is held
@@ -88,8 +108,8 @@ calls return `SourceUnavailable` while `fr` and `ecfr` keep working
 Four layered rate guardrails protect the shared upstream quota:
 
 - **No-429-retry** — the `regs` `HttpClient` is built with `retry429: false`,
-  so a `429` surfaces immediately as `RateLimited` instead of being retried
-  (retrying a quota error only burns more of the budget).
+  so a `429` surfaces immediately as `RateLimited` instead of being
+  retried (retrying a quota error only burns more of the budget).
 - **Per-execute budget** — at most `FEDREG_REGS_MAX_CALLS_PER_EXECUTE`
   (default `30`) regulations.gov upstream calls per single `execute()` run;
   exceeding it fails the call (`RegsCallBudgetExceeded`) rather than fanning

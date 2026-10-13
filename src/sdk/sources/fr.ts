@@ -7,6 +7,8 @@ export function createFrSource(cfg: SourceConfig): Source {
   const http = new HttpClient({
     baseUrl: cfg.frBaseUrl, userAgent: cfg.userAgent, timeoutMs: cfg.timeoutMs,
     retries: cfg.retries, cacheTtlMs: cfg.cacheTtlMs, cacheMaxItems: cfg.cacheMaxItems,
+    label: 'Federal Register API',
+    ...(cfg.frGate ? { gate: cfg.frGate } : {}),
     ...(cfg.dispatcher ? { dispatcher: cfg.dispatcher } : {}),
   });
   const client = new FederalRegisterClient(http);

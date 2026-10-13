@@ -67,7 +67,7 @@ export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpS
           return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
         } catch (err) {
           const e = err as Error;
-          log.warn('tool.error', { tool: tool.name, name: e.name, message: e.message });
+          log.warn('tool.error', { tool: tool.name, name: e.name, error: e.message });
           return {
             isError: true,
             content: [{ type: 'text' as const, text: `${e.name}: ${e.message}` }],

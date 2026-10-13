@@ -5,6 +5,7 @@ import type { IncomingMessage } from 'node:http';
 import { IpRateLimiter, clientIp } from '../src/server/ipRateLimiter.js';
 import { SubjectQuota } from '../src/util/quotas.js';
 import { HttpClient } from '../src/util/httpClient.js';
+import { UpstreamGate } from '../src/util/upstreamGate.js';
 
 describe('IpRateLimiter', () => {
   it('allows up to burst then denies', () => {
@@ -154,5 +155,121 @@ describe('clientIp', () => {
   });
   it('falls back to the peer when the trusted header is missing', () => {
     expect(clientIp(req('100.64.0.2'), 'x-real-ip')).toBe('100.64.0.2');
+  });
+});
+
+describe('HttpClient upstream protection (429 retry, gate, in-flight sharing)', () => {
+  let agent: MockAgent;
+  const ORIGIN = 'https://api.example.gov';
+  beforeEach(() => { agent = new MockAgent(); agent.disableNetConnect(); });
+  afterEach(async () => { await agent.close(); });
+  const client = (extra: Record<string, unknown> = {}) =>
+    new HttpClient({ baseUrl: ORIGIN, dispatcher: agent, retries: 2, cacheTtlMs: 0, cacheMaxItems: 0, label: 'Test API', maxRetryAfterMs: 20, ...extra });
+
+  it('retries a 429 once after Retry-After, then succeeds', async () => {
+    let requests = 0;
+    const pool = agent.get(ORIGIN);
+    pool.intercept({ path: '/once', method: 'GET' }).reply(() => { requests++; return { statusCode: 429, data: 'slow', responseOptions: { headers: { 'retry-after': '0' } } }; });
+    pool.intercept({ path: '/once', method: 'GET' }).reply(() => { requests++; return { statusCode: 200, data: { ok: 1 } }; });
+    expect(await client().call({ path: '/once' })).toEqual({ ok: 1 });
+    expect(requests).toBe(2);
+  });
+
+  it('gives up after a second 429 and names the API in the error', async () => {
+    const pool = agent.get(ORIGIN);
+    pool.intercept({ path: '/twice', method: 'GET' }).reply(429, 'slow');
+    pool.intercept({ path: '/twice', method: 'GET' }).reply(429, 'slow');
+    pool.intercept({ path: '/twice', method: 'GET' }).reply(200, { never: true });
+    await expect(client().call({ path: '/twice' })).rejects.toMatchObject({
+      name: 'RateLimited', status: 429, message: expect.stringContaining('Test API is rate limiting this server'),
+    });
+    // The old behaviour retried 429s three times; the third reply must be left unused.
+    expect(agent.pendingInterceptors()).toHaveLength(1);
+  });
+
+  it('shares one upstream request between identical concurrent GETs', async () => {
+    agent.get(ORIGIN).intercept({ path: '/shared', method: 'GET' }).reply(200, { n: 1 }).delay(30); // only ONE reply
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100 });
+    const [a, b] = await Promise.all([c.call({ path: '/shared' }), c.call({ path: '/shared' })]);
+    expect(a).toEqual({ n: 1 });
+    expect(b).toEqual({ n: 1 });
+  });
+
+  it('shares identical concurrent GETs even with the response cache disabled', async () => {
+    agent.get(ORIGIN).intercept({ path: '/nocache', method: 'GET' }).reply(200, { n: 1 }).delay(30); // only ONE reply
+    const c = client(); // cacheTtlMs: 0, cacheMaxItems: 0
+    const [a, b] = await Promise.all([c.call({ path: '/nocache' }), c.call({ path: '/nocache' })]);
+    expect(a).toEqual({ n: 1 });
+    expect(b).toEqual({ n: 1 });
+  });
+
+  it('reads a decimal Retry-After as seconds, not as a date', async () => {
+    agent.get(ORIGIN).intercept({ path: '/decimal', method: 'GET' }).reply(429, 'slow', { headers: { 'retry-after': '0.05' } });
+    const gate = new UpstreamGate({ concurrency: 4, ratePerSec: 1000, burst: 1000, maxWaitMs: 5000 });
+    await expect(client({ gate, retry429: false, maxRetryAfterMs: 5000 }).call({ path: '/decimal' })).rejects.toMatchObject({ status: 429 });
+    const started = Date.now();
+    (await gate.acquire())();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+  });
+
+  it('does not keep a failed shared request: the next call goes upstream again', async () => {
+    const pool = agent.get(ORIGIN);
+    pool.intercept({ path: '/flaky', method: 'GET' }).reply(404, 'nope');
+    pool.intercept({ path: '/flaky', method: 'GET' }).reply(200, { n: 2 });
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100 });
+    await expect(c.call({ path: '/flaky' })).rejects.toMatchObject({ status: 404 });
+    expect(await c.call({ path: '/flaky' })).toEqual({ n: 2 });
+  });
+
+  it('fails fast with RateLimited when no gate slot frees up, without calling upstream', async () => {
+    agent.get(ORIGIN).intercept({ path: '/gated', method: 'GET' }).reply(200, {});
+    const gate = new UpstreamGate({ concurrency: 1, ratePerSec: 1000, burst: 1000, maxWaitMs: 20 });
+    const held = await gate.acquire();
+    await expect(client({ gate }).call({ path: '/gated' })).rejects.toMatchObject({
+      name: 'RateLimited', message: expect.stringContaining('Test API is busy'),
+    });
+    expect(agent.pendingInterceptors()).toHaveLength(1);
+    held();
+  });
+
+  it('pauses the shared gate when upstream returns 429', async () => {
+    agent.get(ORIGIN).intercept({ path: '/pause', method: 'GET' }).reply(429, 'slow', { headers: { 'retry-after': '1' } });
+    const gate = new UpstreamGate({ concurrency: 4, ratePerSec: 1000, burst: 1000, maxWaitMs: 5000 });
+    await expect(client({ gate, retry429: false, maxRetryAfterMs: 60 }).call({ path: '/pause' })).rejects.toMatchObject({ status: 429 });
+    const started = Date.now();
+    (await gate.acquire())();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(45); // paused for the capped Retry-After
+  });
+});
+
+describe('UpstreamGate', () => {
+  it('admits at most `concurrency` holders and hands a slot to the next waiter on release', async () => {
+    const gate = new UpstreamGate({ concurrency: 2, ratePerSec: 1000, burst: 1000, maxWaitMs: 1000 });
+    const a = await gate.acquire();
+    await gate.acquire();
+    let third = false;
+    const pending = gate.acquire().then(release => { third = true; return release; });
+    await new Promise(r => setTimeout(r, 10));
+    expect(third).toBe(false);
+    a();
+    (await pending)();
+    expect(third).toBe(true);
+  });
+
+  it('resumes at the steady rate after a pause instead of releasing a burst', async () => {
+    const gate = new UpstreamGate({ concurrency: 10, ratePerSec: 50, burst: 10, maxWaitMs: 1000 });
+    gate.pause(20);
+    const started = Date.now();
+    for (let i = 0; i < 3; i++) (await gate.acquire())();
+    // 20ms pause, then 1 immediately and 2 more at 50/s: at least ~60ms, not ~20ms.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(55);
+  });
+
+  it('paces starts to ratePerSec once the burst is spent', async () => {
+    const gate = new UpstreamGate({ concurrency: 10, ratePerSec: 50, burst: 1, maxWaitMs: 1000 });
+    const started = Date.now();
+    for (let i = 0; i < 3; i++) (await gate.acquire())();
+    // 1 from the burst, then 2 more at 50/s: at least ~40ms.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35);
   });
 });

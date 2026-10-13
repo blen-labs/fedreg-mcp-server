@@ -17,7 +17,11 @@ export interface ExecuteDeps {
   sandbox: SandboxRunner;
   regsMaxCallsPerExecute: number;
   regsSubjectQuota: SubjectQuota;
+  /** fr/ecfr calls allowed per execute; defaults to PUBLIC_MAX_CALLS_PER_EXECUTE. */
+  publicMaxCallsPerExecute?: number;
 }
+
+export const PUBLIC_MAX_CALLS_PER_EXECUTE = 100;
 
 /**
  * Per-request context, re-derived from the caller's bearer token on every HTTP request.
@@ -29,6 +33,8 @@ export interface RequestCtx {
 
 export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCtx?: RequestCtx) {
   let regsCalls = 0;
+  let publicCalls = 0;
+  const publicBudget = deps.publicMaxCallsPerExecute ?? PUBLIC_MAX_CALLS_PER_EXECUTE;
   return deps.sandbox.execute(
     { code: input.code, timeoutMs: input.timeoutMs, memoryMb: input.memoryMb, bindings: deps.sdk.registeredNames },
     {
@@ -44,6 +50,12 @@ export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCt
             }
           }
           regsCalls++;
+        } else {
+          // Every user shares this server's footprint on the public APIs; cap what one execute can spend.
+          if (publicCalls >= publicBudget) {
+            return Promise.resolve({ ok: false, error: { name: 'CallBudgetExceeded', message: `Exceeded the per-execute Federal Register/eCFR call budget (${publicBudget}). Narrow your query, use getMany for batches, or split the work across separate execute calls.` } });
+          }
+          publicCalls++;
         }
         return dispatch(deps.sdk, req);
       },
