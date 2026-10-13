@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 /**
  * Minimal Zod -> JSON Schema converter sufficient for our three tool inputs.

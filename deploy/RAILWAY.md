@@ -108,3 +108,12 @@ sees a `401` with a `WWW-Authenticate` header pointing at your metadata URL.
   toolchain — about 220 MB.
 - `dumb-init` is the PID 1 so signals are forwarded cleanly. The server handles
   `SIGTERM`/`SIGINT`, aborts in-flight MCP exchanges, then closes the listener.
+
+## Account authentication
+
+For personal regulations.gov keys, follow [account setup](../docs/accounts.md).
+Provision a dedicated PostgreSQL database, configure the Google callback and the
+listed secrets, and set `FEDREG_AUTH_PROVIDER=accounts`. Remove `--insecure` from
+any Railway start-command override. The image's default command already supports
+account mode. `/health` checks database readiness. Existing public MCP clients
+will need to reconnect using OAuth after this mode is enabled.

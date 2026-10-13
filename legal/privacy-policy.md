@@ -95,8 +95,9 @@ When configured with an OIDC provider such as Clerk, WorkOS, Auth0, or a
 generic OIDC issuer, the server validates bearer tokens and processes token
 claims, including the subject and granted scopes, for authorization and
 quota accounting. The public BLEN endpoint does not require these tokens.
-This software does not provide a dynamic client registration service or a
-production authorization server merely by enabling an authentication option.
+The separate `accounts` mode provides an authorization server and dynamic client
+registration, as described below. Enabling generic OIDC verification alone does
+not provide those services.
 
 ## Your controls
 
@@ -124,3 +125,30 @@ No safeguard is a guarantee against every security incident.
 Updates will be published here with a revised date. Privacy questions and
 requests: **opensource@blencorp.com**. Report vulnerabilities privately using
 the process in [SECURITY.md](../SECURITY.md).
+
+## Optional personal account mode
+
+Deployments configured with `FEDREG_AUTH_PROVIDER=accounts` require Google sign-in
+and OAuth authorization for MCP access. They store account identity (including
+email address and verification status), browser sessions, OAuth client and consent
+records, and encrypted provider tokens in PostgreSQL. This mode uses essential
+session cookies; it does not add advertising cookies or analytics.
+
+Users may save a personal regulations.gov API key on the account page. The server
+checks that key with regulations.gov, then stores it encrypted with AES-256-GCM
+and account-bound authenticated data. Encryption secrets are configured separately
+from the database. The server sends the saved key only to regulations.gov, in an
+API request header. It does not return the saved key to the browser or MCP client.
+Removing or replacing a key applies to subsequent executions; an execution already
+in progress may finish using the earlier key.
+
+Account mode stores hashed OAuth tokens and checks authorization on each request.
+Regulations.gov response caches are specific to an execution; public-source caches
+remain shared. Rate-limit counters are stored in PostgreSQL, with expired counters
+periodically removed. Key-change audit events contain account identifiers, action,
+and time, without API-key material. Account, audit, OAuth, and backup retention is
+controlled by the operator. Key removal from the live database does not delete
+historical backups. Contact the operator for account deletion and retention requests.
+
+These details apply only where account mode has been enabled. See the deployment's
+sign-in page and operator notices for the authentication mode actually in use.

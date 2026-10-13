@@ -67,14 +67,20 @@
     "mcpb:pack": "mcpb pack mcpb-build fedreg-mcp-server.mcpb"
   },
   "dependencies": {
+    "@better-auth/cimd": "1.7.7",
+    "@better-auth/mcp": "1.7.7",
+    "@better-auth/oauth-provider": "1.7.7",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "acorn": "^8.12.1",
     "acorn-walk": "^8.3.4",
-    "jose": "^5.9.6",
+    "better-auth": "1.7.7",
+    "express": "5.2.1",
+    "jose": "^6.2.12",
     "lru-cache": "^11.0.2",
+    "pg": "8.23.1",
     "undici": "^6.21.0",
-    "zod": "^3.23.8"
+    "zod": "^4.6.5"
   },
   "optionalDependencies": {
     "isolated-vm": "^5.0.1"
@@ -82,11 +88,15 @@
   "devDependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",
     "@modelcontextprotocol/client": "2.0.0",
+    "@types/express": "5.0.6",
     "@types/node": "^22.10.2",
+    "@types/pg": "8.23.1",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "eslint": "^9.17.0",
+    "fetch-cookie": "3.2.0",
     "nock": "^14.0.0-beta.19",
+    "tough-cookie": "6.0.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

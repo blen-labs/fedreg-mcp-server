@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { lookupByPathOrPrefix, type CorpusEntry } from '../search/corpus.js';
 
 export const DescribeSchemaInput = z.object({

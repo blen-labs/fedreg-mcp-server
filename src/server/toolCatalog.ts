@@ -19,6 +19,7 @@ export interface ToolDescriptor {
 
 export interface CatalogDeps {
   sdk: Sdk;
+  sdkForSubject?: (subject?: string) => Promise<Sdk>;
   sandbox: SandboxRunner;
   corpus: Corpus;
   regsMaxCallsPerExecute: number;

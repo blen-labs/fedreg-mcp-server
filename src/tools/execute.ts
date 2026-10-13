@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { Sdk } from '../sdk/bindings.js';
 import { dispatch } from '../sdk/runtime.js';
 import type { SandboxRunner } from '../sandbox/types.js';
@@ -14,6 +14,7 @@ export type ExecuteInputT = z.infer<typeof ExecuteInput>;
 
 export interface ExecuteDeps {
   sdk: Sdk;
+  sdkForSubject?: (subject?: string) => Promise<Sdk>;
   sandbox: SandboxRunner;
   regsMaxCallsPerExecute: number;
   regsSubjectQuota: SubjectQuota;
@@ -32,11 +33,12 @@ export interface RequestCtx {
 }
 
 export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCtx?: RequestCtx) {
+  const sdk = deps.sdkForSubject ? await deps.sdkForSubject(requestCtx?.subject) : deps.sdk;
   let regsCalls = 0;
   let publicCalls = 0;
   const publicBudget = deps.publicMaxCallsPerExecute ?? PUBLIC_MAX_CALLS_PER_EXECUTE;
   return deps.sandbox.execute(
-    { code: input.code, timeoutMs: input.timeoutMs, memoryMb: input.memoryMb, bindings: deps.sdk.registeredNames },
+    { code: input.code, timeoutMs: input.timeoutMs, memoryMb: input.memoryMb, bindings: sdk.registeredNames },
     {
       dispatch: (req) => {
         if (req.binding === 'regs') {
@@ -57,7 +59,7 @@ export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCt
           }
           publicCalls++;
         }
-        return dispatch(deps.sdk, req);
+        return dispatch(sdk, req);
       },
     },
   );

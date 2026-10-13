@@ -22,6 +22,15 @@ Instead of bolting on dozens of rigid, narrow tools, it hands the model a small,
 
 > Independent open-source project. It calls public U.S. government APIs and is not affiliated with or endorsed by the U.S. government.
 
+## Personal accounts and regulations.gov keys
+
+Hosted operators can enable `FEDREG_AUTH_PROVIDER=accounts` for Google sign-in,
+a personal API-key page at `/account`, and OAuth/PKCE connections from MCP clients.
+Keys are encrypted in PostgreSQL and selected from each caller's verified account.
+Federal Register and eCFR still work without a saved key. Stdio retains its existing
+`FEDREG_REGS_API_KEY` configuration. See [account setup](docs/accounts.md) for
+required secrets, Google callback configuration, testing, and rollout steps.
+
 ## See it in action
 
 Ask Claude:
