@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { KeyField } from '@/components/fields';
 import { Loading, Notice, Shell } from '@/components/shell';
+import { SignedInAs } from '@/components/signed-in-as';
 import { api, type Keys } from '@/lib/api';
-import { authClient } from '@/lib/auth';
 import { useLoad } from '@/lib/use-load';
 
 function KeyCard({
@@ -106,21 +106,7 @@ export function Account() {
     <Shell
       wide
       title="Your account"
-      description={
-        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          Signed in as {data.email}
-          <Button
-            variant="link"
-            className="h-auto p-0"
-            onClick={async () => {
-              await authClient.signOut();
-              window.location.assign('/');
-            }}
-          >
-            Sign out
-          </Button>
-        </span>
-      }
+      description={<SignedInAs email={data.email} returnTo="/" />}
     >
       {notice && <Notice kind="success">{notice}</Notice>}
       <KeyCard

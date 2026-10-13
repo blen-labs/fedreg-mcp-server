@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loading, Notice, Shell } from '@/components/shell';
+import { SignedInAs } from '@/components/signed-in-as';
 import { api, type Connection } from '@/lib/api';
 import { useFlow } from '@/lib/flow';
 import { useLoad } from '@/lib/use-load';
@@ -40,11 +41,7 @@ export function Consent() {
   return (
     <Shell
       title={`Authorize ${data.client}`}
-      description={
-        <>
-          Signed in as <strong className="text-foreground">{data.email}</strong>.
-        </>
-      }
+      description={<SignedInAs email={data.email} returnTo={`/sign-in?${oauthQuery}`} />}
     >
       {error && <Notice>{error}</Notice>}
       <p className="text-sm">

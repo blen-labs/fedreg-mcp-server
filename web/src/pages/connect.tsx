@@ -3,6 +3,7 @@ import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KeyField } from '@/components/fields';
 import { Loading, Notice, Shell } from '@/components/shell';
+import { SignedInAs } from '@/components/signed-in-as';
 import { api, type Connection, type Keys } from '@/lib/api';
 import { useFlow } from '@/lib/flow';
 import { useLoad } from '@/lib/use-load';
@@ -42,11 +43,7 @@ export function Connect() {
   return (
     <Shell
       title={`Connect ${data.client}`}
-      description={
-        <>
-          Signed in as <strong className="text-foreground">{data.email}</strong>.
-        </>
-      }
+      description={<SignedInAs email={data.email} returnTo={`/sign-in?${oauthQuery}`} />}
     >
       {error && <Notice>{error}</Notice>}
       <form
