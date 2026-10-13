@@ -1,7 +1,8 @@
 # Personal account authentication
 
 `FEDREG_AUTH_PROVIDER=accounts` enables the same Better Auth Google sign-in and
-OAuth provider used by the sibling Data.gov server. This implementation supports
+OAuth provider used by the sibling Data.gov server. The React account and OAuth
+screens reuse the SAM.gov server’s layout, controls, and BLEN footer. This implementation supports
 personal accounts; Data.gov's organization membership and email/password flows
 are not enabled here.
 
@@ -11,9 +12,10 @@ replacing an existing key. The account page only returns connection status, neve
 the stored key. Users can replace or remove it at any time.
 
 An MCP client connects to `/mcp`, discovers the authorization server, registers
-with DCR or CIMD, and uses authorization code + S256 PKCE. The consent page shows
-the client and callback destination and offers authorize/cancel. Users can save a
-key on that page, or authorize without one to use Federal Register and eCFR.
+with DCR or CIMD, and uses authorization code + S256 PKCE. After sign-in, a separate Connect page lets the user check and save a key or
+continue without one for Federal Register and eCFR. The Authorize page then shows
+the client and callback destination and offers Allow/Cancel, with a link back to
+change the key. Account settings support replacement, removal, and sign-out.
 
 ## Configuration
 
@@ -33,7 +35,8 @@ Configure the Google OAuth web application's redirect URI as
 The application must have the appropriate Google consent-screen configuration.
 No Google credentials from the sibling app are copied automatically.
 
-Start with `pnpm build && pnpm start --http`. Do not use `--insecure` in account
+Start with `pnpm build && pnpm start --http`. The build compiles the React frontend
+to `dist/web`; `pnpm dev:web` rebuilds it while editing. Node 20.19+ is required. Do not use `--insecure` in account
 mode; startup rejects that combination. Migrations run before traffic is served,
 under a PostgreSQL advisory lock. Back up the database before upgrading.
 

@@ -26,6 +26,8 @@ Instead of bolting on dozens of rigid, narrow tools, it hands the model a small,
 
 Hosted operators can enable `FEDREG_AUTH_PROVIDER=accounts` for Google sign-in,
 a personal API-key page at `/account`, and OAuth/PKCE connections from MCP clients.
+The interface matches the SAM.gov server: Google sign-in, a Connect key-entry step,
+a separate Authorize screen, and account controls with the shared BLEN styling.
 Keys are encrypted in PostgreSQL and selected from each caller's verified account.
 Federal Register and eCFR still work without a saved key. Stdio retains its existing
 `FEDREG_REGS_API_KEY` configuration. See [account setup](docs/accounts.md) for

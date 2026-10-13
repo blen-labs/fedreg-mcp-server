@@ -22,6 +22,8 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig*.json ./
 COPY src ./src
 COPY schema ./schema
+COPY web ./web
+COPY legal ./legal
 RUN pnpm build
 
 # Trim to runtime deps only (preserves the compiled isolated-vm .node binary).

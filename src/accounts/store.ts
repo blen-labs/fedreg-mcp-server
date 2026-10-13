@@ -21,6 +21,10 @@ export class Store {
         ciphertext JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS connection_steps (
+        session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS request_limits (
         bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at TIMESTAMPTZ NOT NULL
       );
@@ -104,6 +108,23 @@ export class Store {
       client.release();
     }
   }
+  async markConnectionReady(sessionId: string, userId: string) {
+    await this.pool.query(
+      `INSERT INTO connection_steps(session_id,user_id,expires_at) VALUES($1,$2,now()+interval '10 minutes')
+      ON CONFLICT(session_id) DO UPDATE SET user_id=$2,expires_at=now()+interval '10 minutes'`,
+      [sessionId, userId],
+    );
+  }
+  async connectionReady(sessionId: string, userId: string) {
+    const result = await this.pool.query(
+      'SELECT 1 FROM connection_steps WHERE session_id=$1 AND user_id=$2 AND expires_at>now()',
+      [sessionId, userId],
+    );
+    return result.rowCount === 1;
+  }
+  async clearConnectionStep(sessionId: string) {
+    await this.pool.query('DELETE FROM connection_steps WHERE session_id=$1', [sessionId]);
+  }
   async allow(bucket: string, maximum: number, seconds: number) {
     const result = await this.pool.query(
       `INSERT INTO request_limits(bucket,count,expires_at) VALUES($1,1,now()+$2*interval '1 second')
@@ -147,5 +168,6 @@ export class Store {
   }
   async cleanup() {
     await this.pool.query('DELETE FROM request_limits WHERE expires_at<now()');
+    await this.pool.query('DELETE FROM connection_steps WHERE expires_at<now()');
   }
 }

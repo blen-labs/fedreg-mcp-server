@@ -59,6 +59,13 @@ export function createAuth(config: AccountConfig, store: Store) {
         clientRegistrationDefaultScopes: SCOPES,
         clientPrivileges: () => false,
         resourcePrivileges: () => false,
+        // Personal accounts have one key source. Every new authorization gets the
+        // same key-entry step as SAM.gov; /oauth2/continue completes this step.
+        postLogin: {
+          page: '/connect',
+          shouldRedirect: async ({ user, session }) => !await store.connectionReady(session.id, user.id),
+          consentReferenceId: async () => 'personal',
+        },
         customAccessTokenClaims: async ({ user }) => {
           if (!user?.emailVerified) throw new APIError('FORBIDDEN', { error: 'access_denied' });
           return {};

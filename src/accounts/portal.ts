@@ -39,10 +39,77 @@ export function installPortal(app: Express, config: AccountConfig, store: Store,
       await verifyOAuthQueryParams(value, config.authSecret) ? value : undefined;
   }
   const error = (res: Response, status: number, message: string) => res.status(status).json({ error: message });
+  async function account(user: { id: string; email: string }) {
+    const key = await store.keyStatus(personalOwner(user.id));
+    return { email: user.email, personal: { connected: key.connected }, key, mcpUrl: `${config.origin}/mcp` };
+  }
+  async function connection(query: string) {
+    const params = new URLSearchParams(query);
+    const client = await (await auth.$context).adapter.findOne<{ name?: string }>({
+      model: 'oauthClient', where: [{ field: 'clientId', value: params.get('client_id')! }],
+    });
+    const redirect = new URL(params.get('redirect_uri')!);
+    return { client: client?.name || 'This application', destination: redirect.host,
+      local: ['localhost', '127.0.0.1', '[::1]'].includes(redirect.hostname) };
+  }
+  async function continueWith(req: Request, res: Response, path: string, body: object) {
+    const headers = fromNodeHeaders(req.headers);
+    headers.delete('content-length');
+    headers.set('content-type', 'application/json');
+    headers.set('accept', 'application/json');
+    // Forward only the client address trusted by Express, not a caller's spoofed chain.
+    if (req.ip) headers.set('x-forwarded-for', req.ip);
+    else headers.delete('x-forwarded-for');
+    const response = await auth.handler(new globalThis.Request(`${config.origin}/api/auth${path}`, {
+      method: 'POST', headers, body: JSON.stringify(body),
+    }));
+    const cookies = response.headers.getSetCookie();
+    if (cookies.length) res.setHeader('Set-Cookie', cookies);
+    const result = await response.json().catch(() => ({})) as { url?: unknown; redirect_uri?: unknown };
+    const url = response.status >= 300 && response.status < 400 ? response.headers.get('location') : result.url ?? result.redirect_uri;
+    if (typeof url !== 'string' || response.status >= 400) return error(res, 400, 'Connection authorization failed.');
+    res.json({ url: new URL(url, config.origin).toString() });
+  }
+  api.get('/config', (_req, res) => res.json({ google: true, email: false, mcpUrl: `${config.origin}/mcp` }));
+  api.get('/connect', async (req, res) => {
+    const logged = await verified(req);
+    if (!logged) return error(res, 401, 'Sign in to continue.');
+    const query = await validQuery(req.query.oauth_query);
+    if (!query) return error(res, 400, 'This connection request expired. Start again from your AI assistant.');
+    res.json({ ...await connection(query), ...await account(logged.user) });
+  });
+  api.post('/connect', async (req, res) => {
+    const logged = await verified(req);
+    if (!logged) return error(res, 401, 'Sign in to continue.');
+    const query = await validQuery(req.body?.oauth_query);
+    if (!query || !['continue', 'deny'].includes(req.body?.decision) ||
+        Object.keys(req.body ?? {}).some(key => !['oauth_query', 'decision', 'apiKey'].includes(key))) {
+      return error(res, 400, 'Connection authorization failed.');
+    }
+    if (req.body.decision === 'deny') {
+      await store.clearConnectionStep(logged.session.id);
+      return continueWith(req, res, '/oauth2/consent', { oauth_query: query, accept: false });
+    }
+    if (req.body.apiKey) {
+      const owner = personalOwner(logged.user.id);
+      if (!await store.allow(`key:${owner}`, 5, 60)) return error(res, 429, 'Too many key checks. Try again in one minute.');
+      const problem = await checkKey(req.body.apiKey, fetcher);
+      if (problem) return error(res, 400, problem);
+      await store.saveKey(owner, req.body.apiKey, logged.user.id);
+    }
+    await store.markConnectionReady(logged.session.id, logged.user.id);
+    try {
+      return await continueWith(req, res, '/oauth2/continue', { oauth_query: query, postLogin: true });
+    } finally {
+      // Better Auth signs the completed step into the consent query. New flows
+      // must visit Connect again; keep no reusable browser-wide selection.
+      await store.clearConnectionStep(logged.session.id);
+    }
+  });
   api.get('/account', async (req, res) => {
     const logged = await verified(req);
     if (!logged) return error(res, 401, 'Sign in to continue.');
-    res.json({ email: logged.user.email, key: await store.keyStatus(personalOwner(logged.user.id)), mcpUrl: `${config.origin}/mcp` });
+    res.json(await account(logged.user));
   });
   api.post('/keys', async (req, res) => {
     const logged = await verified(req);
@@ -67,33 +134,15 @@ export function installPortal(app: Express, config: AccountConfig, store: Store,
     if (!logged) return error(res, 401, 'Sign in to continue.');
     const query = await validQuery(req.query.oauth_query);
     if (!query) return error(res, 400, 'This connection request expired. Start again from your AI assistant.');
-    const params = new URLSearchParams(query);
-    const client = await (await auth.$context).adapter.findOne<{ name?: string }>({
-      model: 'oauthClient', where: [{ field: 'clientId', value: params.get('client_id')! }],
-    });
-    const redirect = new URL(params.get('redirect_uri')!);
-    res.json({
-      client: client?.name || 'This application', destination: redirect.host,
-      local: ['localhost', '127.0.0.1', '[::1]'].includes(redirect.hostname),
-      email: logged.user.email, key: await store.keyStatus(personalOwner(logged.user.id)),
-    });
+    const key = await store.keyStatus(personalOwner(logged.user.id));
+    res.json({ ...await connection(query), email: logged.user.email, key: { personal: key.connected } });
   });
   api.post('/consent', async (req, res) => {
     const logged = await verified(req);
     if (!logged) return error(res, 401, 'Sign in to continue.');
     const query = await validQuery(req.body?.oauth_query);
     if (!query || typeof req.body?.accept !== 'boolean') return error(res, 400, 'Connection authorization failed.');
-    const headers = fromNodeHeaders(req.headers);
-    headers.delete('content-length');
-    headers.set('accept', 'application/json');
-    const response = await auth.handler(new globalThis.Request(`${config.origin}/api/auth/oauth2/consent`, {
-      method: 'POST', headers, body: JSON.stringify({ oauth_query: query, accept: req.body.accept }),
-    }));
-    const cookies = response.headers.getSetCookie();
-    if (cookies.length) res.setHeader('Set-Cookie', cookies);
-    const result = await response.json().catch(() => ({})) as { url?: unknown; redirect_uri?: unknown };
-    if (!response.ok || typeof (result.url ?? result.redirect_uri) !== 'string') return error(res, 400, 'Connection authorization failed.');
-    res.json({ url: result.url ?? result.redirect_uri });
+    return continueWith(req, res, '/oauth2/consent', { oauth_query: query, accept: req.body.accept });
   });
   app.use('/api/portal', api);
 }

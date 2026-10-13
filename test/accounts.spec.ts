@@ -92,7 +92,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(response.status, await response.clone().text()).toBe(201);
     return await response.json() as any;
   }
-  async function authorize(clientBrowser = browser, accept = true) {
+  async function beginAuthorization(clientBrowser = browser) {
     const client = await register();
     const verifier = randomToken();
     const state = randomToken();
@@ -109,8 +109,16 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       expect(result.redirect, JSON.stringify(result)).toBe(true);
       response = await clientBrowser(new URL(result.url, config.origin));
     }
-    expect(new URL(response.url).pathname).toBe('/consent');
-    const oauth_query = signedQuery(response.url);
+    expect(new URL(response.url).pathname).toBe('/connect');
+    return { client, verifier, state, oauth_query: signedQuery(response.url) };
+  }
+  async function authorize(clientBrowser = browser, accept = true) {
+    const { client, verifier, state, oauth_query: connectQuery } = await beginAuthorization(clientBrowser);
+    const connect = await send(clientBrowser, '/api/portal/connect', { oauth_query: connectQuery, decision: 'continue' });
+    expect(connect.status, await connect.clone().text()).toBe(200);
+    const consentUrl = new URL((await connect.json() as any).url);
+    expect(consentUrl.pathname).toBe('/consent');
+    const oauth_query = signedQuery(consentUrl.toString());
     const info = await clientBrowser(`${config.origin}/api/portal/consent?oauth_query=${encodeURIComponent(oauth_query)}`);
     expect(info.status).toBe(200);
     const consent = await send(clientBrowser, '/api/portal/consent', { oauth_query, accept });
@@ -175,6 +183,42 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const google = await send(fetch, '/api/auth/sign-in/social', { provider: 'google', callbackURL: '/account' });
     expect(google.status, await google.clone().text()).toBe(200);
     expect(new URL((await google.json() as any).url).hostname).toBe('accounts.google.com');
+  });
+  it('serves the SAM.gov-style frontend and policies with same-origin assets', async () => {
+    for (const path of ['/', '/sign-in', '/account', '/connect', '/consent', '/privacy-policy', '/terms']) {
+      const page = await fetch(`${config.origin}${path}`);
+      expect(page.status).toBe(200);
+      expect(page.headers.get('content-security-policy')).toContain("script-src 'self'");
+      const html = await page.text();
+      const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]);
+      expect(assets.length).toBeGreaterThanOrEqual(2);
+      for (const asset of assets) expect((await fetch(`${config.origin}${asset}`)).status).toBe(200);
+    }
+    expect(await (await fetch(`${config.origin}/api/portal/config`)).json()).toMatchObject({ google: true, email: false });
+  });
+  it('validates the separate connection step, preserves saved keys on failure, and allows cancellation', async () => {
+    const { oauth_query, state } = await beginAuthorization();
+    const payload = { oauth_query, decision: 'continue' };
+    expect((await send(fetch, '/api/portal/connect', payload)).status).toBe(401);
+    expect((await send(browser, '/api/portal/connect', payload, 'https://evil.example')).status).toBe(403);
+    expect((await send(browser, '/api/portal/connect', { ...payload, oauth_query: `${oauth_query}&client_id=attacker` })).status).toBe(400);
+    expect((await send(browser, '/api/portal/connect', { ...payload, owner: personalOwner(bob.id) })).status).toBe(400);
+    const info = await browser(`${config.origin}/api/portal/connect?oauth_query=${encodeURIComponent(oauth_query)}`);
+    expect(await info.json()).toMatchObject({ email: alice.email, client: 'Test assistant', personal: { connected: false } });
+    expect((await send(browser, '/api/portal/connect', { ...payload, apiKey: key })).status).toBe(200);
+    expect(await store.getKey(personalOwner(alice.id))).toBe(key);
+    validationStatus = 403;
+    expect((await send(browser, '/api/portal/connect', { ...payload, apiKey: 'z'.repeat(40) })).status).toBe(400);
+    validationStatus = 200;
+    expect(await store.getKey(personalOwner(alice.id))).toBe(key);
+    const denied = await send(browser, '/api/portal/connect', { oauth_query, decision: 'deny' });
+    expect(denied.status, await denied.clone().text()).toBe(200);
+    const callback = new URL((await denied.json() as any).url);
+    expect(callback.searchParams.get('error')).toBe('access_denied');
+    expect(callback.searchParams.get('state')).toBe(state);
+    await store.deleteKey(personalOwner(alice.id), alice.id);
+    // Keep unrelated rate-limit tests independent of this flow's validation attempts.
+    await pool.query('DELETE FROM request_limits');
   });
   it('isolates saved keys, rejects CSRF and owner injection, and preserves keys on failed replacement', async () => {
     expect((await send(fetch, '/api/portal/keys', { apiKey: key })).status).toBe(401);

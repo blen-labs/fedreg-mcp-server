@@ -9,7 +9,9 @@ import { type Store } from './store.js';
 import { createAuth, initializeAuth, type Auth } from './provider.js';
 import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
-import { html, script, styles } from './pages.js';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 
 const CROSS_ORIGIN_PATHS =
   /^\/(?:mcp|\.well-known\/(?:oauth-protected-resource|oauth-authorization-server|openid-configuration)(?:\/[\w-]+)*|api\/auth\/(?:oauth2\/(?:register|token|revoke)|\.well-known\/(?:oauth-authorization-server|openid-configuration)))$/;
@@ -112,11 +114,13 @@ export async function createAccountApp(
       res.status(503).json({ status: 'unavailable' });
     }
   });
-  app.get('/account.css', (_req, res) => res.type('css').send(styles));
-  app.get('/account.js', (_req, res) => res.type('js').send(script));
-  app.get(['/', '/sign-in', '/consent', '/account'], (_req, res) => {
-    res.set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
-    ).type('html').send(html);
+  const webRoot = fileURLToPath(new URL('../../dist/web/', import.meta.url));
+  app.use('/assets', express.static(resolve(webRoot, 'assets'), { immutable: true, maxAge: '1y', index: false }));
+  app.get(['/', '/sign-in', '/connect', '/consent', '/account', '/privacy-policy', '/terms'], async (_req, res) => {
+    const html = await readFile(resolve(webRoot, 'index.html'), 'utf8').catch(() => undefined);
+    if (!html) return res.status(503).send('The web interface is not built. Run pnpm build.');
+    res.set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+      .type('html').send(html);
   });
   const tooMany = (res: express.Response) =>
     res.status(429).set('Retry-After', '60').send('Too many requests');
@@ -212,6 +216,8 @@ export async function createAccountApp(
       const headers = new Headers();
       for (const [name, value] of Object.entries(req.headers))
         if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+      if (req.ip) headers.set('x-forwarded-for', req.ip);
+      else headers.delete('x-forwarded-for');
       const authUrl = new URL(req.originalUrl, config.origin);
       // WHATWG Request normalizes dot segments and backslashes. Reject aliases
       // before forwarding so Express guards and Better Auth see the same path.
