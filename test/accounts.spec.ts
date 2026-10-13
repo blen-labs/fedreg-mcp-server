@@ -192,7 +192,12 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       const html = await page.text();
       const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]);
       expect(assets.length).toBeGreaterThanOrEqual(2);
-      for (const asset of assets) expect((await fetch(`${config.origin}${asset}`)).status).toBe(200);
+      for (const asset of assets) {
+        const response = await fetch(`${config.origin}${asset}`);
+        expect(response.status).toBe(200);
+        // Drain static bundles so Undici can close its pooled connections.
+        await response.arrayBuffer();
+      }
     }
     expect(await (await fetch(`${config.origin}/api/portal/config`)).json()).toMatchObject({ google: true, email: false });
   });
