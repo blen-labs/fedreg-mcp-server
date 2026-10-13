@@ -5,19 +5,25 @@ import type { AccountConfig } from './config.js';
 import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { personalOwner, type Store } from './store.js';
 import type { Auth } from './provider.js';
+import { log } from '../util/logger.js';
 
 /** Keys go only to this fixed upstream; no URL, owner or user ID comes from the form. */
 export async function checkKey(key: unknown, fetcher: typeof fetch = fetch): Promise<string | undefined> {
   if (typeof key !== 'string' || !/^[a-zA-Z0-9]{40}$/.test(key)) return 'Enter your 40-character regulations.gov API key.';
   try {
+    // page[size] must be at least 5: smaller sizes are a 400 for every key.
     const result = await fetcher('https://api.regulations.gov/v4/documents?page[size]=5', {
       headers: { 'X-Api-Key': key, Accept: 'application/vnd.api+json' },
       redirect: 'error', signal: AbortSignal.timeout(10_000),
     });
-    // page[size] must be at least 5: smaller sizes are a 400 for every key.
     // Key validation needs status only. Never log, echo, or persist the upstream body.
     await result.body?.cancel();
-    if (!result.ok) return 'The regulations.gov connection check failed. Your existing key was preserved.';
+    if (result.status === 401 || result.status === 403) return 'regulations.gov rejected this key. Your existing key was preserved.';
+    if (!result.ok) {
+      // Any other status is a problem with the check itself, not the key: record it (status only).
+      log.warn('account.key_check_failed', { status: result.status });
+      return 'The regulations.gov connection check failed. Your existing key was preserved.';
+    }
   } catch {
     return 'The regulations.gov connection check failed. Your existing key was preserved.';
   }

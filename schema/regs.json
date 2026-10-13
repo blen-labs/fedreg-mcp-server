@@ -21,7 +21,7 @@
       "kind": "endpoint",
       "binding": "regs",
       "signature": "regs.comments.search(params)",
-      "description": "Search public comments submitted to regulations.gov. The unique value over Federal Register / eCFR. Filter by filter[commentOnId] (the document's objectId), filter[searchTerm], filter[agencyId], filter[postedDate][ge|le], filter[lastModifiedDate][ge|le]. Results cap at ~5000 per query (page[size] max 250); page past it with the lastModifiedDate cursor (sort by lastModifiedDate, then re-query with filter[lastModifiedDate][ge] = last seen value).",
+      "description": "Search public comments submitted to regulations.gov. The unique value over Federal Register / eCFR. Filter by filter[commentOnId] (the document's objectId), filter[searchTerm], filter[agencyId], filter[postedDate][ge|le], filter[lastModifiedDate][ge|le]. Results cap at ~5000 per query (page[size] 5-250; smaller sizes are rejected); page past it with the lastModifiedDate cursor (sort by lastModifiedDate, then re-query with filter[lastModifiedDate][ge] = last seen value).",
       "example": "await regs.comments.search({ filter: { commentOnId: '0900006481b...' }, sort: 'lastModifiedDate', page: { size: 250 } })"
     },
     {
