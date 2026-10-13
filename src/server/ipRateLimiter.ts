@@ -10,8 +10,11 @@ export class IpRateLimiter {
     // An idle bucket refills to `burst` within burst/rps seconds; after that it is
     // indistinguishable from a new one, so it can be dropped. Bounded so a flood of
     // distinct addresses cannot grow memory without limit.
-    const refillMs = rps > 0 ? Math.ceil((burst / rps) * 1000) : 60_000;
-    this.buckets = new LRUCache({ max: 50_000, ttl: Math.max(refillMs, 1000) });
+    // Clamped to a finite integer: lru-cache throws on a non-integer or infinite ttl, which
+    // rps = 0 or an extreme burst/rps ratio would otherwise produce.
+    const refillMs = Math.ceil((burst / rps) * 1000);
+    const ttl = Number.isFinite(refillMs) ? Math.min(Math.max(refillMs, 1000), Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+    this.buckets = new LRUCache({ max: 50_000, ttl });
   }
 
   allow(ip: string): boolean {

@@ -14,6 +14,7 @@ let handle: HttpHandle;
 let base: string;
 let mockAgent: MockAgent;
 let sandboxAvailable: boolean;
+let deps: CatalogDeps;
 
 beforeAll(async () => {
   mockAgent = new MockAgent();
@@ -41,7 +42,7 @@ beforeAll(async () => {
     frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
     regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
   }));
-  const deps: CatalogDeps = { sdk, sandbox, corpus, regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) };
+  deps = { sdk, sandbox, corpus, regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) };
   handle = await startHttp(deps, {
     host: '127.0.0.1',
     port: 0,
@@ -443,10 +444,7 @@ describe('Origin validation (MCP spec MUST — DNS rebinding / CSRF)', () => {
 
 describe('per-IP rate limit behind a reverse proxy', () => {
   async function server(clientIpHeader?: string) {
-    const sources = { frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
-      regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0 };
-    const h = await startHttp({ sdk: buildSdk(sources), sandbox: await pickSandbox('auto'), corpus: buildCorpus(getSources(sources)),
-      regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) }, {
+    const h = await startHttp(deps, {
       host: '127.0.0.1', port: 0, rps: 0.001, burst: 2, subjectDailyQuota: 1_000_000,
       ...(clientIpHeader ? { clientIpHeader } : {}),
       insecure: true, auth: { provider: 'none' }, publicOrigin: 'http://127.0.0.1',

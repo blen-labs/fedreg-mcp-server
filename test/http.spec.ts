@@ -14,6 +14,12 @@ describe('IpRateLimiter', () => {
     expect(lim.allow('1.2.3.4')).toBe(true);
     expect(lim.allow('1.2.3.4')).toBe(false);
   });
+  it('accepts a zero or extreme refill rate without an invalid cache ttl', () => {
+    const lim = new IpRateLimiter(0, 1);
+    expect(lim.allow('1.2.3.4')).toBe(true);
+    expect(lim.allow('1.2.3.4')).toBe(false);
+    expect(() => new IpRateLimiter(1e-300, 1e10)).not.toThrow();
+  });
 });
 
 describe('SubjectQuota', () => {

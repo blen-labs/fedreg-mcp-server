@@ -49,10 +49,10 @@ function printHelp(): void {
 `);
 }
 
-/** A positive number from the environment, or `fallback` when unset or invalid. */
-function positive(value: string | undefined, fallback: number): number {
+/** A positive number (and at least `min`) from the environment, or `fallback` when unset or invalid. */
+function positive(value: string | undefined, fallback: number, min = 0): number {
   const n = Number(value ?? fallback);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  return Number.isFinite(n) && n > 0 && n >= min ? n : fallback;
 }
 
 async function main(): Promise<void> {
@@ -99,9 +99,10 @@ async function main(): Promise<void> {
     handle = await startHttp(deps, {
       port: args.port,
       host: args.host,
-      // Must be > 0: a NaN or non-positive rate would make the bucket arithmetic meaningless.
+      // rps must be > 0 (a NaN or non-positive rate makes the bucket arithmetic meaningless);
+      // burst must be >= 1, since a bucket that can never hold a whole token rejects everything.
       rps: positive(process.env.FEDREG_IP_RPS, 5),
-      burst: positive(process.env.FEDREG_IP_BURST, 20),
+      burst: positive(process.env.FEDREG_IP_BURST, 20, 1),
       clientIpHeader: (() => {
         const name = process.env.FEDREG_CLIENT_IP_HEADER?.trim().toLowerCase();
         if (!name) return undefined;
