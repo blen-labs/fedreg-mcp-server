@@ -14,6 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         node: ['20', '22']
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: fedreg-ci
+          POSTGRES_DB: fedreg_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:fedreg-ci@localhost:5432/fedreg_test
     steps:
       - uses: actions/checkout@v7
 
@@ -39,8 +51,9 @@ jobs:
 
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      # Build before testing: the account frontend test serves the built dist/web bundle.
       - run: pnpm build
+      - run: pnpm test
 
   conventional-commits:
     name: conventional commits

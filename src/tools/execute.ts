@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { Sdk } from '../sdk/bindings.js';
 import { dispatch } from '../sdk/runtime.js';
 import type { SandboxRunner } from '../sandbox/types.js';
@@ -14,9 +14,11 @@ export type ExecuteInputT = z.infer<typeof ExecuteInput>;
 
 export interface ExecuteDeps {
   sdk: Sdk;
+  sdkForSubject?: (subject?: string) => Promise<Sdk>;
   sandbox: SandboxRunner;
   regsMaxCallsPerExecute: number;
-  regsSubjectQuota: SubjectQuota;
+  /** Absent in account mode, which limits regs per account in PostgreSQL instead. */
+  regsSubjectQuota?: SubjectQuota;
   /** fr/ecfr calls allowed per execute; defaults to PUBLIC_MAX_CALLS_PER_EXECUTE. */
   publicMaxCallsPerExecute?: number;
 }
@@ -32,18 +34,19 @@ export interface RequestCtx {
 }
 
 export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCtx?: RequestCtx) {
+  const sdk = deps.sdkForSubject ? await deps.sdkForSubject(requestCtx?.subject) : deps.sdk;
   let regsCalls = 0;
   let publicCalls = 0;
   const publicBudget = deps.publicMaxCallsPerExecute ?? PUBLIC_MAX_CALLS_PER_EXECUTE;
   return deps.sandbox.execute(
-    { code: input.code, timeoutMs: input.timeoutMs, memoryMb: input.memoryMb, bindings: deps.sdk.registeredNames },
+    { code: input.code, timeoutMs: input.timeoutMs, memoryMb: input.memoryMb, bindings: sdk.registeredNames },
     {
       dispatch: (req) => {
         if (req.binding === 'regs') {
           if (regsCalls >= deps.regsMaxCallsPerExecute) {
             return Promise.resolve({ ok: false, error: { name: 'RegsCallBudgetExceeded', message: `Exceeded the per-execute regulations.gov call budget (${deps.regsMaxCallsPerExecute}). Narrow your query or paginate across separate execute calls.` } });
           }
-          if (requestCtx?.subject) {
+          if (requestCtx?.subject && deps.regsSubjectQuota) {
             const q = deps.regsSubjectQuota.consume(requestCtx.subject);
             if (!q.allowed) {
               return Promise.resolve({ ok: false, error: { name: 'RegsSubjectQuotaExceeded', message: `Per-subject regulations.gov quota exceeded. Try again after ${new Date(q.resetAt).toISOString()}.` } });
@@ -57,7 +60,7 @@ export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCt
           }
           publicCalls++;
         }
-        return dispatch(deps.sdk, req);
+        return dispatch(sdk, req);
       },
     },
   );

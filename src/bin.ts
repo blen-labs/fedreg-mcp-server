@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { startStdio } from './server/stdio.js';
 import { startHttp, type HttpHandle } from './server/http.js';
-import { buildSupervisor, UPSTREAM_DEFAULTS } from './supervisor/index.js';
+import { buildSupervisor, UPSTREAM_DEFAULTS, type SupervisorConfig } from './supervisor/index.js';
 import { PUBLIC_MAX_CALLS_PER_EXECUTE } from './tools/execute.js';
 import type { SandboxKind } from './sandbox/types.js';
 import { log } from './util/logger.js';
@@ -64,11 +64,13 @@ function atLeastOne(value: string | undefined, fallback: number): number {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const deps = await buildSupervisor({
+  const accounts = args.http && process.env.FEDREG_AUTH_PROVIDER === 'accounts';
+  if (accounts && args.insecure) throw new Error('Account authentication cannot be combined with --insecure');
+  const cfg: SupervisorConfig = {
     frBaseUrl: process.env.FEDREG_FR_BASE_URL ?? 'https://www.federalregister.gov/api/v1',
     ecfrBaseUrl: process.env.FEDREG_ECFR_BASE_URL ?? 'https://www.ecfr.gov/api',
     regsBaseUrl: process.env.FEDREG_REGS_BASE_URL ?? 'https://api.regulations.gov',
-    regsApiKey: process.env.FEDREG_REGS_API_KEY,
+    regsApiKey: accounts ? undefined : process.env.FEDREG_REGS_API_KEY,
     userAgent: process.env.FEDREG_USER_AGENT ?? 'fedreg-mcp-server/2.0 (+https://github.com/blen-labs/fedreg-mcp-server)',
     upstreamTimeoutMs: Number(process.env.FEDREG_UPSTREAM_TIMEOUT_MS ?? 20_000),
     upstreamRetries: Number(process.env.FEDREG_UPSTREAM_RETRIES ?? 3),
@@ -89,11 +91,16 @@ async function main(): Promise<void> {
     regsRatePerHour: atLeastOne(process.env.FEDREG_REGS_RATE_PER_HOUR, 1000),
     // Require >= 1; per-subject hourly cap, not "unlimited".
     regsSubjectRatePerHour: atLeastOne(process.env.FEDREG_REGS_SUBJECT_RATE_PER_HOUR, 500),
-  });
+  };
+  const deps = await buildSupervisor(cfg);
 
   let handle: HttpHandle | undefined;
 
-  if (args.http) {
+  if (accounts) {
+    const { loadAccountConfig } = await import('./accounts/config.js');
+    const { startAccountHttp } = await import('./accounts/runtime.js');
+    handle = await startAccountHttp(deps, cfg, loadAccountConfig(process.env), args.port, args.host);
+  } else if (args.http) {
     const allowedOrigins = process.env.FEDREG_ALLOWED_ORIGINS
       ? process.env.FEDREG_ALLOWED_ORIGINS.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
       : undefined;

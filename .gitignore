@@ -15,3 +15,6 @@ launch-video/
 docs/superpowers/
 deno.lock
 release-notes.generated.md
+
+# Local verification fixtures and browser captures
+.local/

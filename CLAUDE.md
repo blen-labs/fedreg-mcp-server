@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Run everything from this directory (`pnpm@10.33.0` pinned via `packageManager`; Node >= 20.10):
+Run everything from this directory (`pnpm@10.33.0` pinned via `packageManager`; Node >= 20.19):
 
 ```bash
 pnpm install
@@ -17,13 +17,13 @@ pnpm test                               # vitest run (all test/*.spec.ts, ~1s, n
 pnpm test test/search.spec.ts           # single file (args forward to vitest, no -- needed)
 pnpm test test/search.spec.ts -t "bm25" # single test by name (pair with file path to keep it fast)
 pnpm lint                               # eslint . — minimal config (unused-vars only); passing means little
-pnpm build                              # tsc -p tsconfig.build.json && (chmod +x dist/bin.js || true)
+pnpm build                              # tsc -p tsconfig.build.json && pnpm build:web (Vite → dist/web) && chmod
 pnpm dev                                # tsx src/bin.ts (stdio)
 pnpm dev --http                         # HTTP transport; also --port, --host, --sandbox, --insecure
 ```
 
 - In `pnpm build`, the `|| true` guards only the `chmod` — a `tsc` failure DOES fail the build. `pnpm typecheck` remains the broader gate (it also covers `test/**`, which the build config excludes).
-- CI (`.github/workflows/ci.yml`) runs `typecheck`, `lint`, `test`, `build` in that order on Node 20 and 22, plus a Docker build. All four must pass; the PR template also requires them as checkboxes.
+- CI (`.github/workflows/ci.yml`) runs `typecheck`, `lint`, `build`, `test` in that order (build first: the Postgres-gated account frontend test serves `dist/web` and skips without it) on Node 20 and 22, plus a Docker build. All four must pass; the PR template also requires them as checkboxes.
 - A green `pnpm test` on a machine with NO sandbox runner does not prove the sandbox works: sandbox-execution tests are gated on `await runner.available()` and report a skip when their runner is unavailable. CI installs isolated-vm AND Deno, so both runners' gated tests execute there.
 
 ### Environment notes

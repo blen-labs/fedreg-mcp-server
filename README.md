@@ -3,7 +3,7 @@
 [![CI](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@blen/fedreg-mcp-server.svg)](https://www.npmjs.com/package/@blen/fedreg-mcp-server)
 [![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520.10-339933.svg)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520.19-339933.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-7c3aed.svg)](https://modelcontextprotocol.io/specification/2026-07-28)
 
 <p align="center">
@@ -21,6 +21,17 @@ This is a [Model Context Protocol](https://modelcontextprotocol.io) server that 
 Instead of bolting on dozens of rigid, narrow tools, it hands the model a small, well-documented SDK and lets it write the exact query it needs in JavaScript — then runs that code in a locked-down sandbox. This is the **code-mode** pattern, and it makes wide government APIs usable without overwhelming the model with tool definitions.
 
 > Independent open-source project. It calls public U.S. government APIs and is not affiliated with or endorsed by the U.S. government.
+
+## Personal accounts and regulations.gov keys
+
+Hosted operators can enable `FEDREG_AUTH_PROVIDER=accounts` for Google sign-in,
+a personal API-key page at `/account`, and OAuth/PKCE connections from MCP clients.
+The interface matches the SAM.gov server: Google sign-in, a Connect key-entry step,
+a separate Authorize screen, and account controls with the shared BLEN styling.
+Keys are encrypted in PostgreSQL and selected from each caller's verified account.
+Federal Register and eCFR still work without a saved key. Stdio retains its existing
+`FEDREG_REGS_API_KEY` configuration. See [account setup](docs/accounts.md) for
+required secrets, Google callback configuration, testing, and rollout steps.
 
 ## See it in action
 
@@ -118,7 +129,7 @@ Restart Claude Desktop, then just ask in plain language:
 > *"What does 40 CFR Part 60 cover?"*
 > *"Which proposed rules opened for public comment this week?"*
 
-Requires **Node.js ≥ 20.10**. `npx` downloads and runs the server on demand; no global install needed. If the `execute` tool reports `SandboxUnavailable`, see [Sandbox runtimes](#sandbox-runtimes).
+Requires **Node.js ≥ 20.19**. `npx` downloads and runs the server on demand; no global install needed. If the `execute` tool reports `SandboxUnavailable`, see [Sandbox runtimes](#sandbox-runtimes).
 
 ## How it works
 
