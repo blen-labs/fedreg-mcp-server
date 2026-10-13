@@ -23,6 +23,7 @@ export interface CatalogDeps {
   corpus: Corpus;
   regsMaxCallsPerExecute: number;
   regsSubjectQuota: SubjectQuota;
+  publicMaxCallsPerExecute?: number;
 }
 
 export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDescriptor[] {

@@ -9,7 +9,7 @@ export function createRegsSource(cfg: SourceConfig): Source {
   const http = new HttpClient({
     baseUrl: cfg.regsBaseUrl, userAgent: cfg.userAgent, timeoutMs: cfg.timeoutMs,
     retries: cfg.retries, cacheTtlMs: cfg.cacheTtlMs, cacheMaxItems: cfg.cacheMaxItems,
-    retry429: false,
+    retry429: false, label: 'Regulations.gov API',
     ...(enabled ? { defaultHeaders: { 'X-Api-Key': key! } } : {}),
     ...(cfg.regsPreflightLimiter ? { preflightLimiter: cfg.regsPreflightLimiter } : {}),
     ...(cfg.dispatcher ? { dispatcher: cfg.dispatcher } : {}),

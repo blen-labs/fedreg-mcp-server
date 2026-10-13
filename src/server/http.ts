@@ -110,11 +110,11 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       // `0` refuses every listen request (the limit check is `open.size >= max`).
       maxSubscriptions: 0,
       // Rejections carry attacker-supplied header/body fragments, so cap what reaches stderr.
-      onerror: (err) => log.warn('mcp.handler.error', { message: truncate(err.message) }),
+      onerror: (err) => log.warn('mcp.handler.error', { error: truncate(err.message) }),
     },
   );
   const nodeHandler = toNodeHandler(mcpHandler, {
-    onerror: (err) => log.warn('mcp.adapter.error', { message: truncate(err.message) }),
+    onerror: (err) => log.warn('mcp.adapter.error', { error: truncate(err.message) }),
   });
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -196,7 +196,7 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
 
       reply(res, 404, { error: 'not_found' });
     } catch (err) {
-      log.error('http.unhandled', { message: (err as Error).message, stack: (err as Error).stack });
+      log.error('http.unhandled', { error: (err as Error).message, stack: (err as Error).stack });
       if (!res.headersSent) reply(res, 500, { error: 'internal' });
     }
   });
