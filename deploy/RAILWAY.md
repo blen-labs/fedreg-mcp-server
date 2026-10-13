@@ -29,6 +29,7 @@ Set these in **Settings → Variables**:
 | `FEDREG_LOG_LEVEL` | no | `info` | `debug`/`info`/`warn`/`error`. |
 | `FEDREG_USER_AGENT` | recommended | `acme-fedreg-mcp/1.0 (contact: ops@acme.com)` | FederalRegister.gov and eCFR appreciate identifiable user agents. |
 | `FEDREG_SANDBOX` | no | `auto` | `isolate` is best on Linux; `auto` falls back to `deno` if available. |
+| `FEDREG_CLIENT_IP_HEADER` | yes | `x-real-ip` | Without it the per-IP rate limit sees Railway's internal proxy addresses, not clients. |
 
 ## 3. Authentication
 
@@ -53,6 +54,7 @@ server skips bearer-token verification entirely.
 |---|---|
 | `FEDREG_IP_RPS` | `5` (token-bucket sustained rate per IP) |
 | `FEDREG_IP_BURST` | `20` (token-bucket burst per IP) |
+| `FEDREG_CLIENT_IP_HEADER` | unset. **Set to `x-real-ip` on Railway**: the edge overwrites it with the client address, while the app's TCP peer is an internal proxy address that changes per connection. |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` requests per authenticated subject per day |
 | `FEDREG_CACHE_TTL_MS` | `300000` (5 min upstream LRU) |
 | `FEDREG_UPSTREAM_TIMEOUT_MS` | `20000` |

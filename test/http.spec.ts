@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockAgent } from 'undici';
 import { gzipSync } from 'node:zlib';
-import { IpRateLimiter } from '../src/server/ipRateLimiter.js';
+import type { IncomingMessage } from 'node:http';
+import { IpRateLimiter, clientIp } from '../src/server/ipRateLimiter.js';
 import { SubjectQuota } from '../src/util/quotas.js';
 import { HttpClient } from '../src/util/httpClient.js';
 
@@ -12,6 +13,12 @@ describe('IpRateLimiter', () => {
     expect(lim.allow('1.2.3.4')).toBe(true);
     expect(lim.allow('1.2.3.4')).toBe(true);
     expect(lim.allow('1.2.3.4')).toBe(false);
+  });
+  it('accepts a zero or extreme refill rate without an invalid cache ttl', () => {
+    const lim = new IpRateLimiter(0, 1);
+    expect(lim.allow('1.2.3.4')).toBe(true);
+    expect(lim.allow('1.2.3.4')).toBe(false);
+    expect(() => new IpRateLimiter(1e-300, 1e10)).not.toThrow();
   });
 });
 
@@ -130,5 +137,22 @@ describe('HttpClient default headers + 429', () => {
     const c = client({ retries: 0, cacheTtlMs: 60_000, cacheMaxItems: 100 });
     await expect(c.call({ path: '/corrupt.xml', accept: 'xml' })).rejects.toThrow();
     expect(await c.call({ path: '/corrupt.xml', accept: 'xml' })).toBe('<TITLE/>');
+  });
+});
+
+describe('clientIp', () => {
+  const req = (remoteAddress: string, headers: Record<string, string | string[]> = {}) =>
+    ({ socket: { remoteAddress }, headers }) as unknown as IncomingMessage;
+  it('uses the TCP peer when no header is trusted, even if forwarding headers are sent', () => {
+    expect(clientIp(req('::ffff:100.64.0.2', { 'x-real-ip': '1.2.3.4', 'x-forwarded-for': '1.2.3.4' }))).toBe('100.64.0.2');
+  });
+  it('reads the trusted header (Railway: x-real-ip), case-insensitively', () => {
+    expect(clientIp(req('100.64.0.2', { 'x-real-ip': '71.178.42.139' }), 'X-Real-IP')).toBe('71.178.42.139');
+  });
+  it('takes the rightmost entry of a list-valued header, the one the proxy added', () => {
+    expect(clientIp(req('10.0.0.5', { 'x-forwarded-for': '6.6.6.6, 1.2.3.4' }), 'x-forwarded-for')).toBe('1.2.3.4');
+  });
+  it('falls back to the peer when the trusted header is missing', () => {
+    expect(clientIp(req('100.64.0.2'), 'x-real-ip')).toBe('100.64.0.2');
   });
 });
