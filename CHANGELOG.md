@@ -18,6 +18,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+
+## [2.2.0] - 2026-10-13
+
+### Added
+- keep /mcp open and move sign-in to /mcp/account (#10) (auth)
 ## [2.1.0] - 2026-10-13
 
 ### Added
@@ -205,7 +210,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.11...v2.1.0
 [2.0.11]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.10...v2.0.11
 [2.0.10]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.9...v2.0.10
