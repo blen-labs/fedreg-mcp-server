@@ -11,7 +11,8 @@ export interface AccountConfig {
   subjectDailyQuota?: number;
 }
 
-export function loadAccountConfig(env = process.env): AccountConfig {
+/** `env` is passed in by src/bin.ts, the only module that reads process.env. */
+export function loadAccountConfig(env: Record<string, string | undefined>): AccountConfig {
   const required = (name: string) => {
     const value = env[name];
     if (!value || value.includes('REPLACE_WITH_')) throw new Error(`Missing configuration: ${name}`);

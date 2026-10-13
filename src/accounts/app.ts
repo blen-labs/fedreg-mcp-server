@@ -9,6 +9,7 @@ import { type Store } from './store.js';
 import { createAuth, initializeAuth, type Auth } from './provider.js';
 import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
+import { log } from '../util/logger.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -58,11 +59,35 @@ export async function createAccountApp(
   if (config.production) app.set('trust proxy', 1);
   const auth = createAuth(config, store);
   await initializeAuth(auth, config, store);
-  const locks = new Pool({ ...store.pool.options, max: 2 });
-  locks.on('error', () => console.error('auth_lock_connection_error'));
+  // Each waiting token request holds a connection, so size this for concurrent token requests.
+  const locks = new Pool({ ...store.pool.options, max: 10 });
+  locks.on('error', () => log.error('account.auth_lock_connection_error'));
+  /**
+   * The advisory lock for a /oauth2/token or /oauth2/revoke body: the owner of the presented
+   * refresh or access token, else the presented code or token itself (an unknown token
+   * changes nothing, and a code is single-use). Tokens are stored as digests of their value.
+   */
+  const tokenLockId = async (body: Buffer | undefined) => {
+    let fields: Record<string, unknown> = {};
+    const text = body?.toString('utf8').trim() ?? '';
+    try { fields = text.startsWith('{') ? JSON.parse(text) : Object.fromEntries(new URLSearchParams(text)); }
+    catch { /* Better Auth rejects the malformed body; any lock id will do. */ }
+    const value = (name: string) => typeof fields[name] === 'string' ? fields[name] as string : undefined;
+    const token = value('refresh_token') ?? value('token');
+    let key = `code:${value('code') ?? ''}`;
+    if (token) {
+      const { adapter } = await auth.$context;
+      const where = [{ field: 'token', value: digest(token) }];
+      const row = await adapter.findOne<{ userId?: string }>({ model: 'oauthRefreshToken', where })
+        ?? await adapter.findOne<{ userId?: string }>({ model: 'oauthAccessToken', where });
+      key = row?.userId ? `user:${row.userId}` : `token:${digest(token)}`;
+    }
+    // pg_advisory_lock takes a signed 64-bit key.
+    return BigInt.asIntN(64, BigInt(`0x${digest(key).slice(0, 16)}`)).toString();
+  };
   const mcp = createMcpHandler(
     ctx => buildMcpServer(deps, { subject: ctx.authInfo?.extra?.userId as string | undefined }),
-    { legacy: 'stateless', maxSubscriptions: 0, onerror: () => console.error('mcp_handler_error') },
+    { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.mcp_handler_error') },
   );
   const resource = `${config.origin}/mcp`;
   const foreignOrigin = (req: express.Request) =>
@@ -98,7 +123,7 @@ export async function createAccountApp(
     }
     // Everything else is a cookie-authenticated browser surface and stays same-origin.
     if (foreignOrigin(req)) {
-      console.error('origin_rejected');
+      log.warn('account.origin_rejected');
       return res.status(403).send('Invalid origin');
     }
     next();
@@ -135,9 +160,11 @@ export async function createAccountApp(
     next();
   });
   const mcpNode = toNodeHandler(mcp, {
-    onerror: () => console.error('mcp_http_error'),
+    onerror: () => log.warn('account.mcp_http_error'),
   });
-  app.all('/mcp', express.raw({ type: () => true, limit: '64kb' }), async (req, res) => {
+  // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
+  // must work in both modes. The SDK reads the body only after the token checks below pass.
+  app.all('/mcp', async (req, res) => {
     const challenge = (status: number, error: string) =>
       res
         .status(status)
@@ -189,10 +216,7 @@ export async function createAccountApp(
         extra: { userId: user.id },
       },
     });
-    let body: unknown;
-    try { body = req.body?.length ? JSON.parse(req.body.toString()) : undefined; }
-    catch { return res.status(400).json({ error: 'invalid_json' }); }
-    await mcpNode(req, res, body);
+    await mcpNode(req, res);
   });
   // Clients look for authorization-server metadata in different places: RFC 8414 path
   // insertion for the /api/auth issuer (canonical, served by Better Auth), the issuer path with
@@ -268,25 +292,24 @@ export async function createAccountApp(
         const response = await auth.handler(request);
         // Registration failures are otherwise invisible; log the outcome only, no request data.
         if (req.path === '/oauth2/register')
-          console.log(
-            JSON.stringify({
-              msg: 'client_registration',
-              status: response.status,
-              crossOrigin: foreignOrigin(req),
-            }),
-          );
+          log.info('client_registration', { status: response.status, crossOrigin: foreignOrigin(req) });
         return forwardResponse(response, res);
       };
       if (req.path !== '/oauth2/token' && req.path !== '/oauth2/revoke') return execute();
       // Serialize token-family rotation and invalidation across replicas. Better Auth's
-      // current adapter performs those writes separately; overlapping requests must not interleave.
+      // current adapter performs those writes separately; overlapping requests must not
+      // interleave. A family is every refresh token of one (client, user), so refresh and revoke
+      // lock per user and a code exchange locks per code: unrelated users never queue together.
+      // A code exchange can still overlap a family wipe for the same user; at worst that new
+      // authorization is revoked and the user authorizes again.
+      const lockId = await tokenLockId(Buffer.isBuffer(body) ? body : undefined);
       const lock = await locks.connect();
       try {
-        await lock.query("SELECT pg_advisory_lock(hashtext('fedreg-oauth-exchange'))");
+        await lock.query('SELECT pg_advisory_lock($1)', [lockId]);
         await execute();
       } finally {
         try {
-          await lock.query("SELECT pg_advisory_unlock(hashtext('fedreg-oauth-exchange'))");
+          await lock.query('SELECT pg_advisory_unlock($1)', [lockId]);
         } catch {
           lock.release(true);
           throw new Error('OAuth lock connection failed');
@@ -308,7 +331,7 @@ export async function createAccountApp(
         if (!res.headersSent) res.status(413).send('Request too large');
         return;
       }
-      console.error('request_failed');
+      log.error('account.request_failed');
       if (!res.headersSent)
         res
           .status(500)

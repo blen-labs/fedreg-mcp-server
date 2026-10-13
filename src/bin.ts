@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   if (accounts) {
     const { loadAccountConfig } = await import('./accounts/config.js');
     const { startAccountHttp } = await import('./accounts/runtime.js');
-    handle = await startAccountHttp(deps, cfg, loadAccountConfig(), args.port, args.host);
+    handle = await startAccountHttp(deps, cfg, loadAccountConfig(process.env), args.port, args.host);
   } else if (args.http) {
     const allowedOrigins = process.env.FEDREG_ALLOWED_ORIGINS
       ? process.env.FEDREG_ALLOWED_ORIGINS.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)

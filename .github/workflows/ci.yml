@@ -51,8 +51,9 @@ jobs:
 
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      # Build before testing: the account frontend test serves the built dist/web bundle.
       - run: pnpm build
+      - run: pnpm test
 
   conventional-commits:
     name: conventional commits

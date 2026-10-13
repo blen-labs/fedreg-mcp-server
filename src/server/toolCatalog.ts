@@ -23,7 +23,7 @@ export interface CatalogDeps {
   sandbox: SandboxRunner;
   corpus: Corpus;
   regsMaxCallsPerExecute: number;
-  regsSubjectQuota: SubjectQuota;
+  regsSubjectQuota?: SubjectQuota;
   publicMaxCallsPerExecute?: number;
 }
 

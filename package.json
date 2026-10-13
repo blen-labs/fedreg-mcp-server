@@ -66,8 +66,7 @@
     "mcpb:prepare": "node scripts/mcpb-prepare.mjs",
     "mcpb:pack": "mcpb pack mcpb-build fedreg-mcp-server.mcpb",
     "build:web": "vite build --config web/vite.config.ts",
-    "dev:web": "vite build --watch --config web/vite.config.ts",
-    "pretest": "pnpm build:web"
+    "dev:web": "vite build --watch --config web/vite.config.ts"
   },
   "dependencies": {
     "@better-auth/cimd": "1.7.7",

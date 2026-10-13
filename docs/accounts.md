@@ -55,19 +55,23 @@ hosting or a different proxy chain needs a corresponding trust-proxy review.
   client secrets are encrypted. Bearer access requires the right resource,
   `fedreg:read` scope, a current verified user, and an enabled client.
 - Requests recheck the opaque token in PostgreSQL, so revocation takes effect on
-  subsequent requests. Refresh-token rotation and revocation are serialized across
-  replicas. Access tokens last 15 minutes; refresh tokens last 30 days.
-- Each execution reads the current personal key. Replacement or deletion affects
-  the next execution; a request already in flight may finish with the previous key.
+  subsequent requests. Refresh-token rotation and revocation are serialized per
+  user across replicas; each authorization-code exchange is serialized per code. Access tokens last 15 minutes; refresh tokens last 30 days.
+- An execution reads the current personal key the first time its code calls
+  `regs`; Federal Register and eCFR calls never read it. Replacement or deletion
+  affects the next execution; a request already in flight may finish with the
+  previous key.
 - The account transport never falls back to `FEDREG_REGS_API_KEY`. That setting
   remains available for stdio and legacy HTTP modes. Account credentials go only
   to `https://api.regulations.gov`; legacy upstream overrides cannot change this.
-- Public-source caches stay shared. Authenticated regulations.gov bindings and
-  their response caches live only for an execution. Keys never enter the sandbox.
+- Public-source caches stay shared. Each process caches regulations.gov clients
+  (and their response caches) by account and key, so a new key gets a fresh cache.
+  Keys never enter the sandbox.
 - `FEDREG_REGS_RATE_PER_HOUR` caps each account in PostgreSQL across replicas.
   `FEDREG_SUBJECT_DAILY_QUOTA` also caps MCP requests per account per UTC day.
-  Per-execution budgets and the existing per-subject guard also apply. Browser,
-  key-validation, and OAuth endpoints have separate rate limits.
+  The per-execution call budget also applies; `FEDREG_REGS_SUBJECT_RATE_PER_HOUR`
+  is ignored in account mode. Browser, key-validation, and OAuth endpoints have
+  separate rate limits.
 - Browser state-changing requests require same-origin JSON; cookies are HttpOnly
   and SameSite, with Secure enabled in production. Responses are non-cacheable.
 - Audit rows record owner, actor, action, and timestamp, not API-key material.

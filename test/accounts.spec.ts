@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { Pool } from 'pg';
 import { testUtils } from 'better-auth/plugins';
 import fetchCookie from 'fetch-cookie';
 import { CookieJar } from 'tough-cookie';
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
+import { MockAgent } from 'undici';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { Keyring, randomToken, digest } from '../src/accounts/crypto.js';
 import { Store, personalOwner } from '../src/accounts/store.js';
@@ -51,16 +52,24 @@ it('validates keys only at regulations.gov and preserves safe errors', async () 
   expect(await checkKey(key, async () => { throw new Error(key); })).not.toContain(key);
 });
 
+/** Counts key reads, to check that fr/ecfr-only executions never touch the credential store. */
+class CountingStore extends Store {
+  keyReads = 0;
+  override async getKey(owner: string) {
+    this.keyReads++;
+    return super.getKey(owner);
+  }
+}
+
 const database = process.env.TEST_DATABASE_URL;
 describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
-  let pool: Pool, store: Store, server: Server, config: AccountConfig;
+  let pool: Pool, store: CountingStore, server: Server, config: AccountConfig;
   let service: Awaited<ReturnType<typeof createAccountApp>>;
   let helper: ReturnType<ReturnType<typeof testUtils>['init']>['context']['test'];
   let alice: any, bob: any, browser: typeof fetch, other: typeof fetch;
   let validationStatus = 200;
   const schema = `fedreg_test_${randomBytes(8).toString('hex')}`;
   const key = 'a'.repeat(40), key2 = 'b'.repeat(40);
-  const originalDispatcher = getGlobalDispatcher();
   let mock: MockAgent;
   const cfg: SupervisorConfig = {
     frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
@@ -150,7 +159,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const admin = new Pool({ connectionString: database });
     await admin.query(`CREATE SCHEMA ${schema}`); await admin.end();
     pool = new Pool({ connectionString: database, options: `-c search_path=${schema}` });
-    store = new Store(pool, new Keyring('v1', { v1: randomBytes(32) }));
+    store = new CountingStore(pool, new Keyring('v1', { v1: randomBytes(32) }));
     await store.initialize();
     server = createServer();
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -158,17 +167,16 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       databaseUrl: database!, authSecret: randomToken(), googleClientId: 'fixture-google', googleClientSecret: 'fixture-secret', keyring: new Keyring('v1', { v1: randomBytes(32) }) };
     const deps = await buildSupervisor(cfg);
     expect(await deps.sandbox.available(), 'Deno is required for account integration tests').toBe(true);
-    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store), async () => new Response(null, { status: validationStatus }));
+    // Upstream regulations.gov calls go through an injected MockAgent, never the global dispatcher.
+    mock = new MockAgent(); mock.disableNetConnect();
+    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store, mock), async () => new Response(null, { status: validationStatus }));
     server.on('request', service.app);
     helper = testUtils().init((await service.auth.$context) as unknown as Parameters<ReturnType<typeof testUtils>['init']>[0]).context.test;
     alice = await helper.saveUser(helper.createUser({ email: 'alice@example.test', emailVerified: true }));
     bob = await helper.saveUser(helper.createUser({ email: 'bob@example.test', emailVerified: true }));
     browser = await login(alice.id); other = await login(bob.id);
-    mock = new MockAgent(); mock.disableNetConnect(); mock.enableNetConnect(/^127\.0\.0\.1:\d+$/);
-    setGlobalDispatcher(mock);
   });
   afterAll(async () => {
-    setGlobalDispatcher(originalDispatcher);
     await mock?.close(); await service?.close();
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));
     if (pool) { await pool.query(`DROP SCHEMA ${schema} CASCADE`); await pool.end(); }
@@ -184,7 +192,9 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(google.status, await google.clone().text()).toBe(200);
     expect(new URL((await google.json() as any).url).hostname).toBe('accounts.google.com');
   });
-  it('serves the SAM.gov-style frontend and policies with same-origin assets', async () => {
+  // Needs the Vite bundle: `pnpm build` (CI builds before testing). Skipped, not failed, without it.
+  const webBuilt = existsSync(new URL('../dist/web/index.html', import.meta.url));
+  it.skipIf(!webBuilt)('serves the SAM.gov-style frontend and policies with same-origin assets (needs pnpm build)', async () => {
     for (const path of ['/', '/sign-in', '/account', '/connect', '/consent', '/privacy-policy', '/terms']) {
       const page = await fetch(`${config.origin}${path}`);
       expect(page.status).toBe(200);
@@ -261,6 +271,41 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect((await mcp(a.access_token, 'return await regs.documents.search();')).body).toContain('Save a regulations.gov API key');
     expect((await mcp(a.access_token)).body).toContain('42');
     expect(await store.getKey(personalOwner(bob.id))).toBe(key2);
+  });
+  it('keeps upstream error status without the key, and keeps public sources working when a saved key cannot be read', async () => {
+    const a = await token();
+    expect((await send(browser, '/api/portal/keys', { apiKey: key })).status).toBe(200);
+    mock.get('https://api.regulations.gov')
+      .intercept({ path: '/v4/documents/missing', method: 'GET', headers: { 'x-api-key': key } })
+      .reply(404, { errors: [{ detail: key }] });
+    const missing = await mcp(a.access_token, 'try { await regs.documents.get("missing"); } catch (e) { return `${e.name}: ${e.message}`; }');
+    expect(missing.body).toContain('HttpError');
+    expect(missing.body).toContain('404');
+    expect(missing.body).not.toContain(key);
+    // A ciphertext sealed under a retired key ID can no longer be opened.
+    await pool.query(`UPDATE credentials SET ciphertext = jsonb_set(ciphertext, '{kid}', '"retired"') WHERE owner=$1`, [personalOwner(alice.id)]);
+    expect((await mcp(a.access_token)).body).toContain('42');
+    expect((await mcp(a.access_token, 'return await regs.documents.search();')).body).toContain('could not be loaded');
+    await store.deleteKey(personalOwner(alice.id), alice.id);
+  });
+  it('reads the key only for regs calls, reuses regs response caches, and accepts large requests', async () => {
+    const b = await token(other);
+    const own = 'd'.repeat(40);
+    expect((await send(other, '/api/portal/keys', { apiKey: own })).status).toBe(200);
+    const before = store.keyReads;
+    // Over the 64KB cap account mode used to apply; the base HTTP transport has none.
+    const large = await mcp(b.access_token, `// ${'x'.repeat(100_000)}\nreturn 42;`);
+    expect(large.status).toBe(200);
+    expect(large.body).toContain('42');
+    expect(store.keyReads).toBe(before);
+    // One upstream reply serves both executions: the second comes from the cached client.
+    mock.get('https://api.regulations.gov')
+      .intercept({ path: '/v4/dockets/CACHE-1', method: 'GET', headers: { 'x-api-key': own } })
+      .reply(200, { data: 'Cached docket' });
+    for (let i = 0; i < 2; i++)
+      expect((await mcp(b.access_token, 'return await regs.dockets.get("CACHE-1");')).body).toContain('Cached docket');
+    expect(store.keyReads).toBe(before + 2);
+    await store.deleteKey(personalOwner(bob.id), bob.id);
   });
   it('supports the official MCP client and rejects expired, wrong-resource, under-scoped and disabled-client tokens', async () => {
     const a = await token();

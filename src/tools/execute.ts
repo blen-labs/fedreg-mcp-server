@@ -17,7 +17,8 @@ export interface ExecuteDeps {
   sdkForSubject?: (subject?: string) => Promise<Sdk>;
   sandbox: SandboxRunner;
   regsMaxCallsPerExecute: number;
-  regsSubjectQuota: SubjectQuota;
+  /** Absent in account mode, which limits regs per account in PostgreSQL instead. */
+  regsSubjectQuota?: SubjectQuota;
   /** fr/ecfr calls allowed per execute; defaults to PUBLIC_MAX_CALLS_PER_EXECUTE. */
   publicMaxCallsPerExecute?: number;
 }
@@ -45,7 +46,7 @@ export async function execute(input: ExecuteInputT, deps: ExecuteDeps, requestCt
           if (regsCalls >= deps.regsMaxCallsPerExecute) {
             return Promise.resolve({ ok: false, error: { name: 'RegsCallBudgetExceeded', message: `Exceeded the per-execute regulations.gov call budget (${deps.regsMaxCallsPerExecute}). Narrow your query or paginate across separate execute calls.` } });
           }
-          if (requestCtx?.subject) {
+          if (requestCtx?.subject && deps.regsSubjectQuota) {
             const q = deps.regsSubjectQuota.consume(requestCtx.subject);
             if (!q.allowed) {
               return Promise.resolve({ ok: false, error: { name: 'RegsSubjectQuotaExceeded', message: `Per-subject regulations.gov quota exceeded. Try again after ${new Date(q.resetAt).toISOString()}.` } });
