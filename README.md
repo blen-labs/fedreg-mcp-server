@@ -29,7 +29,8 @@ a personal API-key page at `/account`, and OAuth/PKCE connections from MCP clien
 The interface matches the SAM.gov server: Google sign-in, a Connect key-entry step,
 a separate Authorize screen, and account controls with the shared BLEN styling.
 Keys are encrypted in PostgreSQL and selected from each caller's verified account.
-Federal Register and eCFR still work without a saved key. Stdio retains its existing
+Signed-in clients connect `/mcp/account`; `/mcp` keeps serving Federal Register and
+eCFR with no sign-in (and regulations.gov through `FEDREG_REGS_API_KEY`, if set). Stdio retains its existing
 `FEDREG_REGS_API_KEY` configuration. See [account setup](docs/accounts.md) for
 required secrets, Google callback configuration, testing, and rollout steps.
 

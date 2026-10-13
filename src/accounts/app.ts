@@ -10,13 +10,15 @@ import { createAuth, initializeAuth, type Auth } from './provider.js';
 import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
 import { log } from '../util/logger.js';
-import { clientIp } from '../server/ipRateLimiter.js';
+import { IpRateLimiter, clientIp } from '../server/ipRateLimiter.js';
+import { originAllowed } from '../server/http.js';
+import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
 const CROSS_ORIGIN_PATHS =
-  /^\/(?:mcp|\.well-known\/(?:oauth-protected-resource|oauth-authorization-server|openid-configuration)(?:\/[\w-]+)*|api\/auth\/(?:oauth2\/(?:register|token|revoke)|\.well-known\/(?:oauth-authorization-server|openid-configuration)))$/;
+  /^\/(?:mcp(?:\/account)?|\.well-known\/(?:oauth-protected-resource|oauth-authorization-server|openid-configuration)(?:\/[\w-]+)*|api\/auth\/(?:oauth2\/(?:register|token|revoke)|\.well-known\/(?:oauth-authorization-server|openid-configuration)))$/;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
@@ -56,6 +58,8 @@ export async function createAccountApp(
   store: Store,
   deps: CatalogDeps,
   fetcher: typeof fetch = fetch,
+  /** Catalog for the anonymous endpoint (see publicDependencies): no subject, regs only via a shared key. */
+  publicDeps: CatalogDeps,
 ): Promise<{ app: express.Express; auth: Auth; mcp: ReturnType<typeof createMcpHandler>; close: () => Promise<void> }> {
   const app = express();
   app.disable('x-powered-by');
@@ -97,10 +101,15 @@ export async function createAccountApp(
     ctx => buildMcpServer(deps, { subject: ctx.authInfo?.extra?.userId as string | undefined }),
     { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.mcp_handler_error') },
   );
-  const resource = `${config.origin}/mcp`;
+  // Anonymous endpoint: the same tools with no subject. No token is read or required.
+  const publicMcp = createMcpHandler(
+    () => buildMcpServer(publicDeps, {}),
+    { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.public_mcp_handler_error') },
+  );
+  const resource = `${config.origin}${ACCOUNT_MCP_PATH}`;
   const foreignOrigin = (req: express.Request) =>
     !!req.headers.origin && req.headers.origin !== config.origin;
-  const metadataUrl = `${config.origin}/.well-known/oauth-protected-resource/mcp`;
+  const metadataUrl = `${config.origin}/.well-known/oauth-protected-resource${ACCOUNT_MCP_PATH}`;
   const originHost = new URL(config.origin).host;
   app.use((req, res, next) => {
     res.set({
@@ -164,19 +173,36 @@ export async function createAccountApp(
   app.use(async (req, res, next) => {
     // Hosted connectors (ChatGPT, Claude) send every user's OAuth and MCP traffic from a few
     // shared egress IPs, so those endpoints are limited elsewhere: Better Auth limits each OAuth
-    // endpoint, and /mcp is limited per user after the token is checked (see below).
+    // endpoint, and the signed-in MCP endpoint is limited per user after the token is checked
+    // (see below). The anonymous endpoint has its own per-IP bucket (FEDREG_IP_RPS/BURST) below.
     const platform =
       CROSS_ORIGIN_PATHS.test(req.path) &&
-      (req.path !== '/mcp' || !!req.headers.authorization?.startsWith('Bearer '));
+      (req.path !== ACCOUNT_MCP_PATH || !!req.headers.authorization?.startsWith('Bearer '));
     if (!platform && !(await store.allow(`http:${ipOf(req)}`, 600, 60))) return tooMany(res);
     next();
   });
   const mcpNode = toNodeHandler(mcp, {
     onerror: () => log.warn('account.mcp_http_error'),
   });
+  const publicNode = toNodeHandler(publicMcp, {
+    onerror: () => log.warn('account.public_mcp_http_error'),
+  });
+  // In memory per replica, like the base transport's limiter it mirrors.
+  const publicLimiter = new IpRateLimiter(config.ipRps ?? 5, config.ipBurst ?? 20);
+  // Federal Register and eCFR need no sign-in. A bearer token sent here is ignored: signed-in
+  // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
+  app.all(PUBLIC_MCP_PATH, async (req, res) => {
+    if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
+    // As in the base transport (MCP's Origin rule): with no token to check, a browser on another
+    // site must not drive this endpoint. Non-browser clients send no Origin and pass.
+    const origin = req.headers.origin;
+    if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? []))
+      return res.status(403).json({ error: 'origin_not_allowed' });
+    await publicNode(req, res);
+  });
   // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
   // must work in both modes. The SDK reads the body only after the token checks below pass.
-  app.all('/mcp', async (req, res) => {
+  app.all(ACCOUNT_MCP_PATH, async (req, res) => {
     const challenge = (status: number, error: string) =>
       res
         .status(status)
@@ -361,6 +387,7 @@ export async function createAccountApp(
     mcp,
     close: async () => {
       await mcp.close();
+      await publicMcp.close();
       await locks.end();
     },
   };

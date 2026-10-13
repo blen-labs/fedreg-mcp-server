@@ -2,6 +2,7 @@ import express, { type Express, type Request, type Response } from 'express';
 import { fromNodeHeaders } from 'better-auth/node';
 import { verifyOAuthQueryParams } from '@better-auth/oauth-provider';
 import type { AccountConfig } from './config.js';
+import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { personalOwner, type Store } from './store.js';
 import type { Auth } from './provider.js';
 
@@ -44,7 +45,7 @@ export function installPortal(
   const error = (res: Response, status: number, message: string) => res.status(status).json({ error: message });
   async function account(user: { id: string; email: string }) {
     const key = await store.keyStatus(personalOwner(user.id));
-    return { email: user.email, personal: { connected: key.connected }, key, mcpUrl: `${config.origin}/mcp` };
+    return { email: user.email, personal: { connected: key.connected }, key, mcpUrl: `${config.origin}${ACCOUNT_MCP_PATH}` };
   }
   async function connection(query: string) {
     const params = new URLSearchParams(query);
@@ -74,7 +75,7 @@ export function installPortal(
     if (typeof url !== 'string' || response.status >= 400) return error(res, 400, 'Connection authorization failed.');
     res.json({ url: new URL(url, config.origin).toString() });
   }
-  api.get('/config', (_req, res) => res.json({ google: true, email: false, mcpUrl: `${config.origin}/mcp` }));
+  api.get('/config', (_req, res) => res.json({ google: true, email: false, mcpUrl: `${config.origin}${ACCOUNT_MCP_PATH}`, publicMcpUrl: `${config.origin}${PUBLIC_MCP_PATH}` }));
   api.get('/connect', async (req, res) => {
     const logged = await verified(req);
     if (!logged) return error(res, 401, 'Sign in to continue.');

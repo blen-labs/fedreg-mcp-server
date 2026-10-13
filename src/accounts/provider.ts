@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { mcp } from '@better-auth/mcp';
+import { ACCOUNT_MCP_PATH } from './paths.js';
 import { cimd } from '@better-auth/cimd';
 import { fetchClientMetadataResource } from '@better-auth/cimd/node';
 import { getMigrations } from 'better-auth/db/migration';
@@ -45,7 +46,7 @@ export function createAuth(config: AccountConfig, store: Store) {
     },
     plugins: [
       mcp({
-        resource: `${config.origin}/mcp`,
+        resource: `${config.origin}${ACCOUNT_MCP_PATH}`,
         loginPage: '/sign-in',
         consentPage: '/consent',
         scopes: SCOPES,
@@ -88,7 +89,7 @@ export async function initializeAuth(auth: Auth, config: AccountConfig, store: S
     const migration = await getMigrations(auth.options);
     await migration.runMigrations();
     const context = await auth.$context;
-    const resource = `${config.origin}/mcp`;
+    const resource = `${config.origin}${ACCOUNT_MCP_PATH}`;
     if (!await context.adapter.findOne({ model: 'oauthResource', where: [{ field: 'identifier', value: resource }] })) {
       await context.adapter.create({ model: 'oauthResource', data: {
         identifier: resource, name: 'Federal Register MCP', allowedScopes: SCOPES,

@@ -11,6 +11,11 @@ export interface AccountConfig {
   subjectDailyQuota?: number;
   /** Header the reverse proxy overwrites with the client address (Railway: x-real-ip). */
   clientIpHeader?: string;
+  /** Per-IP token bucket for the anonymous /mcp endpoint (FEDREG_IP_RPS / FEDREG_IP_BURST). */
+  ipRps?: number;
+  ipBurst?: number;
+  /** Extra browser origins allowed on the anonymous /mcp (FEDREG_ALLOWED_ORIGINS), as in the base transport. */
+  allowedOrigins?: string[];
 }
 
 /** `env` is passed in by src/bin.ts, the only module that reads process.env. */
@@ -42,8 +47,13 @@ export function loadAccountConfig(env: Record<string, string | undefined>): Acco
   if (!Number.isInteger(subjectDailyQuota) || subjectDailyQuota < 1) throw new Error('FEDREG_SUBJECT_DAILY_QUOTA must be a positive integer');
   const clientIpHeader = env.FEDREG_CLIENT_IP_HEADER?.trim().toLowerCase() || undefined;
   if (clientIpHeader && !/^[a-z0-9-]+$/.test(clientIpHeader)) throw new Error('FEDREG_CLIENT_IP_HEADER must be a header name');
+  const ipRps = Number(env.FEDREG_IP_RPS ?? 5), ipBurst = Number(env.FEDREG_IP_BURST ?? 20);
   return {
     subjectDailyQuota, clientIpHeader,
+    allowedOrigins: (env.FEDREG_ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+    // Same rules as the base transport: rps > 0 and burst >= 1, else the defaults.
+    ipRps: Number.isFinite(ipRps) && ipRps > 0 ? ipRps : 5,
+    ipBurst: Number.isFinite(ipBurst) && ipBurst >= 1 ? ipBurst : 20,
     origin: origin.origin, production, authSecret,
     databaseUrl: required('DATABASE_URL'),
     googleClientId: required('GOOGLE_CLIENT_ID'),
