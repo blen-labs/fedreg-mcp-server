@@ -19,6 +19,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+
+## [2.2.1] - 2026-10-13
+
+### Fixed
+- accept valid regulations.gov keys and match Data.gov's sign-out (#11) (auth)
 ## [2.2.0] - 2026-10-13
 
 ### Added
@@ -210,7 +215,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.11...v2.1.0
 [2.0.11]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.0.10...v2.0.11
