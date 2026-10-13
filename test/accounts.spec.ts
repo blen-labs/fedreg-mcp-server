@@ -46,12 +46,13 @@ it('validates keys only at regulations.gov and preserves safe errors', async () 
   const key = 'k'.repeat(40);
   expect(await checkKey('bad')).toMatch(/40-character/);
   expect(await checkKey(key, async (url, init) => {
-    expect(String(url)).toBe('https://api.regulations.gov/v4/documents?page[size]=1');
+    expect(String(url)).toBe('https://api.regulations.gov/v4/documents?page[size]=5');
     expect(new Headers(init?.headers).get('X-Api-Key')).toBe(key);
     expect(init?.redirect).toBe('error');
     return new Response(null, { status: 200 });
   })).toBeUndefined();
-  expect(await checkKey(key, async () => new Response(key, { status: 403 }))).toMatch(/preserved/);
+  expect(await checkKey(key, async () => new Response(key, { status: 403 }))).toMatch(/rejected this key.*preserved/);
+  expect(await checkKey(key, async () => new Response(key, { status: 400 }))).toMatch(/connection check failed.*preserved/);
   expect(await checkKey(key, async () => { throw new Error(key); })).not.toContain(key);
 });
 
@@ -308,6 +309,20 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(await (await fetch(`${config.origin}/api/portal/config`)).json()).toMatchObject({
       mcpUrl: `${config.origin}/mcp/account`, publicMcpUrl: `${config.origin}/mcp`,
     });
+  });
+  it('signs out mid-connection the way the Sign out button does, ending that session only', async () => {
+    const session = await login(alice.id);
+    const { oauth_query: connectQuery } = await beginAuthorization(session);
+    const connect = await send(session, '/api/portal/connect', { oauth_query: connectQuery, decision: 'continue' });
+    expect(connect.status, await connect.clone().text()).toBe(200);
+    const oauth_query = signedQuery((await connect.json() as any).url);
+    const consent = `${config.origin}/api/portal/consent?oauth_query=${encodeURIComponent(oauth_query)}`;
+    expect((await session(consent)).status).toBe(200);
+    // The button posts '{}' to Better Auth directly, without the page's signed query.
+    expect((await send(session, '/api/auth/sign-out', {})).status).toBe(200);
+    expect((await session(consent)).status).toBe(401);
+    // Other sessions of the same user stay signed in.
+    expect((await browser(`${config.origin}/api/portal/account`)).status).toBe(200);
   });
   it('enforces consent denial, signed queries, and PKCE', async () => {
     expect((await send(browser, '/api/portal/consent', { oauth_query: 'client_id=attacker', accept: true })).status).toBe(400);

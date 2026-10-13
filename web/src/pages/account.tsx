@@ -3,8 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { KeyField } from '@/components/fields';
-import { Loading, Notice, Shell } from '@/components/shell';
-import { SignedInAs } from '@/components/signed-in-as';
+import { Loading, Notice, Shell, SignedInAs, SignOut } from '@/components/shell';
 import { api, type Keys } from '@/lib/api';
 import { useLoad } from '@/lib/use-load';
 
@@ -106,7 +105,8 @@ export function Account() {
     <Shell
       wide
       title="Your account"
-      description={<SignedInAs email={data.email} returnTo="/" />}
+      description={<SignedInAs email={data.email} />}
+      action={<SignOut then="/" />}
     >
       {notice && <Notice kind="success">{notice}</Notice>}
       <KeyCard

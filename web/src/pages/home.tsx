@@ -8,7 +8,7 @@ function ConnectorUrl({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-      <code className="flex-1 truncate text-sm">{url}</code>
+      <code className="min-w-0 flex-1 truncate text-sm">{url}</code>
       <Button
         size="icon"
         variant="ghost"

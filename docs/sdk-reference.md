@@ -120,7 +120,7 @@ match count. Each `search` takes a single params object:
 {
   filter?: Record<string, string | number | boolean | { ge?: string; le?: string }>,
   sort?: string,          // e.g. 'lastModifiedDate' or '-postedDate'
-  page?: { number?: number; size?: number },  // size max 250
+  page?: { number?: number; size?: number },  // size 5-250 (smaller is a 400)
 }
 ```
 
@@ -152,7 +152,7 @@ methods take an id and, for documents/comments, an optional
 
 ### Pagination past 5000 results
 
-regulations.gov caps any single query at ~5000 results (`page[size]` max 250,
+regulations.gov caps any single query at ~5000 results (`page[size]` 5-250,
 so ~20 pages). To read further, page with the `lastModifiedDate` cursor: sort
 by `lastModifiedDate`, walk the pages, then re-query with
 `filter: { lastModifiedDate: { ge: <last value seen> } }` and continue.
