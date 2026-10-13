@@ -14,6 +14,8 @@ export interface AccountConfig {
   /** Per-IP token bucket for the anonymous /mcp endpoint (FEDREG_IP_RPS / FEDREG_IP_BURST). */
   ipRps?: number;
   ipBurst?: number;
+  /** Extra browser origins allowed on the anonymous /mcp (FEDREG_ALLOWED_ORIGINS), as in the base transport. */
+  allowedOrigins?: string[];
 }
 
 /** `env` is passed in by src/bin.ts, the only module that reads process.env. */
@@ -48,6 +50,7 @@ export function loadAccountConfig(env: Record<string, string | undefined>): Acco
   const ipRps = Number(env.FEDREG_IP_RPS ?? 5), ipBurst = Number(env.FEDREG_IP_BURST ?? 20);
   return {
     subjectDailyQuota, clientIpHeader,
+    allowedOrigins: (env.FEDREG_ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
     // Same rules as the base transport: rps > 0 and burst >= 1, else the defaults.
     ipRps: Number.isFinite(ipRps) && ipRps > 0 ? ipRps : 5,
     ipBurst: Number.isFinite(ipBurst) && ipBurst >= 1 ? ipBurst : 20,

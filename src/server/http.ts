@@ -61,7 +61,7 @@ function truncate(message: string): string {
 /** Hostnames whose origins are always acceptable: local web tooling and dev UIs. */
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-function originAllowed(originHeader: string, ownOrigin: string, allowlist: string[]): boolean {
+export function originAllowed(originHeader: string, ownOrigin: string, allowlist: string[]): boolean {
   const value = originHeader.toLowerCase();
   if (value === ownOrigin.toLowerCase()) return true;
   if (allowlist.some(allowed => allowed.toLowerCase() === value)) return true;

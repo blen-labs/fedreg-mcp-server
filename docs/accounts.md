@@ -19,7 +19,8 @@ an endpoint answers 401:
 | `/mcp` | none | yes | the operator's shared `FEDREG_REGS_API_KEY` if set, otherwise a `SourceUnavailable` error naming `/mcp/account` |
 | `/mcp/account` | Google, OAuth/PKCE | yes | the user's own saved key |
 
-`/mcp` ignores any bearer token and is limited per client IP with `FEDREG_IP_RPS`
+`/mcp` ignores any bearer token, refuses browser requests from other origins unless
+listed in `FEDREG_ALLOWED_ORIGINS` (as the base transport does), and is limited per client IP with `FEDREG_IP_RPS`
 and `FEDREG_IP_BURST` (in memory per replica, like the base transport).
 
 An MCP client connects to `/mcp/account`, discovers the authorization server, registers
@@ -79,12 +80,14 @@ hosting or a different proxy chain needs a corresponding trust-proxy review.
   (and their response caches) by account and key, so a new key gets a fresh cache.
   Keys never enter the sandbox.
 - `FEDREG_REGS_RATE_PER_HOUR` caps each account in PostgreSQL across replicas.
+  On the anonymous `/mcp`, it also caps the shared `FEDREG_REGS_API_KEY` per process
+  (in memory), as in the base transport.
   `FEDREG_SUBJECT_DAILY_QUOTA` also caps MCP requests per account per UTC day.
   The per-execution call budget also applies; `FEDREG_REGS_SUBJECT_RATE_PER_HOUR`
   is ignored in account mode. Browser, key-validation, and OAuth endpoints have
   separate rate limits. Per-IP limits here are fixed (600/min per IP for browser
   traffic, 6000/min per IP on `/mcp/account` before the per-user limit) and ignore
-  `FEDREG_IP_RPS`/`FEDREG_IP_BURST`. Behind a proxy, set `FEDREG_CLIENT_IP_HEADER`
+  `FEDREG_IP_RPS`/`FEDREG_IP_BURST`; only the anonymous `/mcp` uses those. Behind a proxy, set `FEDREG_CLIENT_IP_HEADER`
   (Railway: `x-real-ip`): with it unset, Express's `trust proxy` takes the
   rightmost `X-Forwarded-For` entry, which on Railway is its edge, so many users
   would share one bucket, including Better Auth's OAuth limits.

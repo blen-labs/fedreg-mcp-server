@@ -11,6 +11,7 @@ import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
 import { log } from '../util/logger.js';
 import { IpRateLimiter, clientIp } from '../server/ipRateLimiter.js';
+import { originAllowed } from '../server/http.js';
 import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -57,8 +58,8 @@ export async function createAccountApp(
   store: Store,
   deps: CatalogDeps,
   fetcher: typeof fetch = fetch,
-  /** Catalog for the anonymous endpoint: no subject, regs only via a shared key if configured. */
-  publicDeps: CatalogDeps = { ...deps, sdkForSubject: undefined },
+  /** Catalog for the anonymous endpoint (see publicDependencies): no subject, regs only via a shared key. */
+  publicDeps: CatalogDeps,
 ): Promise<{ app: express.Express; auth: Auth; mcp: ReturnType<typeof createMcpHandler>; close: () => Promise<void> }> {
   const app = express();
   app.disable('x-powered-by');
@@ -172,8 +173,8 @@ export async function createAccountApp(
   app.use(async (req, res, next) => {
     // Hosted connectors (ChatGPT, Claude) send every user's OAuth and MCP traffic from a few
     // shared egress IPs, so those endpoints are limited elsewhere: Better Auth limits each OAuth
-    // endpoint, and /mcp is limited per user after the token is checked (see below).
-    // The anonymous endpoint has its own per-IP bucket (FEDREG_IP_RPS/BURST) below.
+    // endpoint, and the signed-in MCP endpoint is limited per user after the token is checked
+    // (see below). The anonymous endpoint has its own per-IP bucket (FEDREG_IP_RPS/BURST) below.
     const platform =
       CROSS_ORIGIN_PATHS.test(req.path) &&
       (req.path !== ACCOUNT_MCP_PATH || !!req.headers.authorization?.startsWith('Bearer '));
@@ -192,6 +193,11 @@ export async function createAccountApp(
   // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
     if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
+    // As in the base transport (MCP's Origin rule): with no token to check, a browser on another
+    // site must not drive this endpoint. Non-browser clients send no Origin and pass.
+    const origin = req.headers.origin;
+    if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? []))
+      return res.status(403).json({ error: 'origin_not_allowed' });
     await publicNode(req, res);
   });
   // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts

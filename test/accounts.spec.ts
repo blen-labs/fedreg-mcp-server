@@ -63,6 +63,25 @@ it('keeps the shared regs key on the anonymous endpoint when one is configured, 
   expect(publicDependencies(keyed, 'https://x.example')).toBe(keyed);
 });
 
+it('never lets the shared regs key reach the signed-in catalog', async () => {
+  const cfg: SupervisorConfig = {
+    frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+    regsBaseUrl: 'https://api.regulations.gov', regsApiKey: 'shared-operator-key', userAgent: 'test',
+    upstreamTimeoutMs: 2000, upstreamRetries: 0, cacheTtlMs: 60000, cacheMaxItems: 10,
+    sandbox: 'deno', regsMaxCallsPerExecute: 30, regsRatePerHour: 1000, regsSubjectRatePerHour: 500,
+  };
+  const deps = await buildSupervisor(cfg);
+  expect(deps.sdk.methods.regs).toBeDefined();
+  // A user with no saved key: regs must ask for one, never fall back to the shared key.
+  const noKey = { getKey: async () => undefined } as unknown as Store;
+  const account = accountDependencies(deps, cfg, noKey);
+  expect(account.sdk.methods.regs).toBeUndefined();
+  expect(account.sdk.clients.regs).toBeUndefined();
+  const sdk = await account.sdkForSubject!('user-1');
+  await expect(sdk.methods.regs!['documents.search']!()).rejects.toMatchObject({ name: 'SourceUnavailable' });
+  expect(publicDependencies(deps, 'https://x.example')).toBe(deps);
+});
+
 /** Counts key reads, to check that fr/ecfr-only executions never touch the credential store. */
 class CountingStore extends Store {
   keyReads = 0;
@@ -281,6 +300,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(anonymous.body).toContain('42');
     // A bearer token is not required, and one sent here is ignored rather than checked.
     expect((await mcp('not-a-token', 'return 7;', '/mcp')).body).toContain('7');
+    // MCP's Origin rule, as in the base transport: other sites' browsers are refused.
+    expect((await fetch(`${config.origin}/mcp`, { method: 'POST', headers: { origin: 'https://evil.example', 'content-type': 'application/json' }, body: '{}' })).status).toBe(403);
     const regs = await mcp(undefined, 'try { await regs.documents.search(); } catch (e) { return `${e.name}: ${e.message}`; }', '/mcp');
     expect(regs.body).toContain('SourceUnavailable');
     expect(regs.body).toContain(`${config.origin}/mcp/account`);

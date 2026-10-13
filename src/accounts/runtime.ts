@@ -8,7 +8,7 @@ import { log } from '../util/logger.js';
 import { createRegsSource } from '../sdk/sources/regs.js';
 import { LRUCache } from 'lru-cache';
 import { createAccountApp } from './app.js';
-import { ACCOUNT_MCP_PATH } from './paths.js';
+import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { digest } from './crypto.js';
 import { Store, personalOwner } from './store.js';
 import type { AccountConfig } from './config.js';
@@ -119,6 +119,8 @@ export async function startAccountHttp(deps: CatalogDeps, cfg: SupervisorConfig,
   let service: Awaited<ReturnType<typeof createAccountApp>> | undefined;
   try {
     await store.initialize();
+    // Before this endpoint split, account mode ignored the shared key; make its new use visible.
+    if (deps.sdk.methods.regs) log.info('account.public_regs_shared_key', { path: PUBLIC_MCP_PATH });
     service = await createAccountApp(config, store, accountDependencies(deps, cfg, store), fetch, publicDependencies(deps, config.origin));
     const server = createServer(service.app);
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
