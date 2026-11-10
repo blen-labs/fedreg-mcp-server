@@ -1,10 +1,10 @@
-# Terms of Service — Federal Register & eCFR Explorer (by BLEN)
+# Terms of Service — Federal Regulations MCP (by BLEN)
 
 _Last updated: 2026-09-22_
 
 ## 1. Acceptance and scope
 
-By accessing or using the BLEN-hosted **Federal Register & eCFR Explorer**
+By accessing or using the BLEN-hosted **Federal Regulations MCP**
 at `https://fedreg.mcp.blenlabs.com/mcp` (the "Service", operated by BLEN,
 Inc.), you agree to these terms. If you do not agree, do not use the Service.
 If you use it on behalf of an organization, you represent that you are

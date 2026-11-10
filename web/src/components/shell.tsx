@@ -34,7 +34,7 @@ export function Shell({
   return (
     <main className="flex min-h-svh flex-col items-center gap-6 px-4 py-10 sm:py-16">
       <a href="/" className="text-muted-foreground text-sm font-medium tracking-tight">
-        Federal Register MCP
+        Federal Regulations MCP
       </a>
       <Card className={wide ? 'w-full max-w-2xl' : 'w-full max-w-md'}>
         <CardHeader>

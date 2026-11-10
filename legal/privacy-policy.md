@@ -1,8 +1,8 @@
-# Privacy Policy — Federal Register & eCFR Explorer (by BLEN)
+# Privacy Policy — Federal Regulations MCP (by BLEN)
 
 _Last updated: 2026-09-22_
 
-This policy describes how **Federal Register & eCFR Explorer**, powered by
+This policy describes how **Federal Regulations MCP**, powered by
 `@blen/fedreg-mcp-server` (the "Service", operated by BLEN, Inc.), handles data
 when accessed from Gemini Enterprise or another MCP client.
 

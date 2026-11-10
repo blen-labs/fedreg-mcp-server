@@ -15,7 +15,7 @@ export function buildManifest(pkg) {
   return {
     manifest_version: '0.1',
     name: 'fedreg-mcp-server',
-    display_name: 'Federal Register, eCFR & regulations.gov (Code Mode)',
+    display_name: 'Federal Regulations MCP (Code Mode)',
     version: pkg.version,
     description:
       'Code-mode MCP server exposing FederalRegister.gov, eCFR, and regulations.gov APIs via fr.*, ecfr.*, and regs.* SDK bindings.',

@@ -157,6 +157,7 @@ describe('Streamable HTTP transport', () => {
     expect(r.status).toBe(200);
     const meta = await r.json() as Record<string, unknown>;
     expect(meta.resource).toBe('http://127.0.0.1/mcp');
+    expect(meta.resource_name).toBe('Federal Regulations MCP Server');
     expect(Array.isArray(meta.bearer_methods_supported)).toBe(true);
   });
 
