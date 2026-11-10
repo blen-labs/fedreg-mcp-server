@@ -36,7 +36,7 @@ export function Home() {
   const publicUrl = config?.publicMcpUrl ?? `${window.location.origin}/mcp`;
   return (
     <Shell
-      title="Connect Federal Register to your AI assistant"
+      title="Connect Federal Regulations MCP to your AI assistant"
       description="Search Federal Register, eCFR, and regulations.gov from your AI assistant."
     >
       <p className="text-muted-foreground text-sm">

@@ -13,6 +13,6 @@ export function oauthProtectedResource(cfg: AuthConfig, resourceUrl: string) {
     bearer_methods_supported: ['header'],
     scopes_supported: cfg.scopes ?? [],
     resource_documentation: 'https://github.com/blen-labs/fedreg-mcp-server#self-hosting-remote-http',
-    resource_name: 'Federal Register, eCFR & regulations.gov MCP Server',
+    resource_name: 'Federal Regulations MCP Server',
   };
 }
