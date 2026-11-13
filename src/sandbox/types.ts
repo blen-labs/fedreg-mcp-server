@@ -1,8 +1,12 @@
+import type { SandboxLimits } from './limits.js';
+
 export interface ExecuteOptions {
   code: string;
   timeoutMs?: number;
   memoryMb?: number;
   bindings?: string[];
+  /** Overrides for the runner's byte budgets. */
+  limits?: Partial<SandboxLimits>;
 }
 
 export interface ExecuteResult {

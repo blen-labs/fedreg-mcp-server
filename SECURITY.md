@@ -55,10 +55,12 @@ The `execute` tool runs user-supplied JavaScript with two layered defenses:
 2. **Runtime isolation** — one of:
    - `isolated-vm`: a fresh V8 isolate, **no host references** other than
      a Reference to the RPC dispatcher and a log sink for `console.*`;
-     heap cap, wall-clock cap.
-   - `deno run --no-prompt <runner>`: subprocess with **no `--allow-*` flags**,
-     so no net/fs/env/ffi/subprocess access; wall-clock cap. The runner is a
-     temporary file so stdin stays free for the host RPC channel.
+     heap cap, host-owned wall-clock cap (the isolate is disposed when it fires).
+   - `deno run --no-prompt`: subprocess with **no `--allow-*` flags** and a
+     minimal environment, so no net/fs/env/ffi/subprocess access. User code
+     runs in a Worker with the protocol and ambient globals removed; the host
+     validates and size-bounds every frame and kills the process group on
+     every exit path, so a frame can never cancel the deadline.
 
 Both runners deny network access to user code; the only way to reach
 upstream APIs is via the `fr.*` / `ecfr.*` / `regs.*` proxies, which serialize

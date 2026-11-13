@@ -187,7 +187,7 @@ errors), `SandboxUnavailable` (no runner), and a timeout when `timeoutMs` is
 exceeded.
 
 Inside `execute` a thrown error is captured by `execute`'s own
-`{ ok: false, error: { name, message, stack } }` envelope and surfaces to
+`{ ok: false, error: { name, message, status? } }` envelope and surfaces to
 the MCP client as a normal tool result (no `isError` field) whose text block
 contains that structured error JSON — inspect `ok`, not `isError`.
 

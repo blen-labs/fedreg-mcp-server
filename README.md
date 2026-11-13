@@ -214,7 +214,7 @@ CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--ins
 
 ## Security
 
-User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a wall-clock timeout, and — on the `isolated-vm` runner — a heap cap (`memoryMb` is not enforceable on the Deno fallback). The full threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new) rather than a public issue.
+User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a host-owned wall-clock timeout, a heap cap, and byte budgets on logs and results. The full threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new) rather than a public issue.
 
 ## Contributing
 

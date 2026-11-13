@@ -140,10 +140,14 @@ Two runners are supported:
 
 - **`isolate`** — `isolated-vm` (V8 isolate). First choice on Linux / macOS /
   Windows on x64 / arm64.
-- **`deno`** — a `deno run --no-prompt <runner-file>` subprocess with **no
-  `--allow-*` flags** (the runner is written to a temp file so stdin stays
-  free for the host RPC channel). Fallback when `isolated-vm` is unavailable
-  (e.g. Alpine, some ARM targets).
+- **`deno`** — a `deno run --no-prompt` subprocess with **no `--allow-*`
+  flags** and a minimal environment, running a fixed supervisor script. User
+  code arrives by message and runs in a module Worker whose ambient globals
+  (`Deno`, `postMessage`, `fetch`, `Worker`, ...) are removed first, so it
+  cannot reach the host protocol. The supervisor talks to the host in
+  token-prefixed JSON lines; the token never reaches user code, and all child
+  output is size-bounded and treated as untrusted. Fallback when `isolated-vm`
+  is unavailable (e.g. Alpine, some ARM targets).
 
 Both runners enforce:
 
@@ -151,9 +155,15 @@ Both runners enforce:
   `new Function` and references to `process`, `globalThis`, `Buffer`,
   `Deno`, `fetch`, `Worker`, plus `__proto__` / `constructor` / `prototype`
   member access.
-- **Wall-clock timeout** (default 15 s, configurable via `timeoutMs`).
-- **Memory cap** (default 64 MB on the isolate runner; not directly
-  enforceable on Deno).
+- **Host-owned wall-clock timeout** (default 15 s, configurable via
+  `timeoutMs`). The host disposes the isolate or kills the Deno process group
+  when it fires, whatever user code is awaiting; nothing user code sends can
+  cancel it.
+- **Memory cap** (default 64 MB: the isolate heap limit, or V8's old-space
+  limit inside Deno).
+- **Byte budgets** (`src/sandbox/limits.ts`) on code, logs, SDK arguments,
+  pending SDK calls and the returned value (8 MB; larger results fail with
+  `ResultTooLarge`).
 - **No network / fs / env / subprocess** at the runtime layer (the AST
   check is just the first line of defense).
 
