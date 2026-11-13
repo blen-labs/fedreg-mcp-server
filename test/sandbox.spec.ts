@@ -182,7 +182,12 @@ describe('deno runner isolation (gated on availability)', () => {
   it('resolves only after its child process has exited', async ({ skip }) => {
     if (!(await runner.available()) || process.platform === 'win32') return skip();
     const { execFileSync } = await import('node:child_process');
-    const count = () => { try { return execFileSync('pgrep', ['-f', 'fedreg-deno-.*supervisor.js']).toString().trim().split('\n').filter(Boolean).length; } catch { return 0; } };
+    // Only this worker's own children: other spec files run Deno sandboxes in parallel processes.
+    // pgrep exits 1 on "no match" (zero children); any other failure (e.g. pgrep missing) must fail the test, not read as 0.
+    const count = () => {
+      try { return execFileSync('pgrep', ['-P', String(process.pid), '-f', 'fedreg-deno-.*supervisor\\.js']).toString().trim().split('\n').filter(Boolean).length; }
+      catch (e) { if ((e as { status?: number }).status === 1) return 0; throw e; }
+    };
     const before = count();
     await run('return 1');
     expect(count()).toBe(before);
