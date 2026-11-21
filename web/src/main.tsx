@@ -9,6 +9,7 @@ import { Connect } from '@/pages/connect';
 import { Consent } from '@/pages/consent';
 import { Account } from '@/pages/account';
 import { Policy } from '@/pages/policy';
+import { ErrorPage, NotFound } from '@/components/kit/error-page';
 
 // Follow the system color scheme; shadcn's dark tokens apply under .dark.
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -27,6 +28,8 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/privacy-policy" element={<Policy kind="privacy" />} />
         <Route path="/terms" element={<Policy kind="terms" />} />
         <Route path="/account" element={<Account />} />
+        <Route path="/error" element={<ErrorPage />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

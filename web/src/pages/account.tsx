@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { KeyField } from '@/components/fields';
-import { Loading, Notice, Shell, SignedInAs, SignOut } from '@/components/shell';
+import { Notice } from '@/components/kit/notice';
+import { Loading, Shell, SignedInAs, SignOut } from '@/components/kit/shell';
 import { api, type Keys } from '@/lib/api';
 import { useLoad } from '@/lib/use-load';
 
@@ -25,6 +26,7 @@ function KeyCard({
   const [busy, setBusy] = useState(false);
   /** Runs a change; the server's warning, if any, replaces the success notice. */
   async function run(action: () => Promise<{ warning?: string }>, notice: string) {
+    if (busy) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -40,11 +42,13 @@ function KeyCard({
   return (
     <Card className="shadow-none">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {title}
-          <Badge variant={connected ? 'default' : 'outline'}>
-            {connected ? 'Key saved' : 'No key'}
-          </Badge>
+        <CardTitle asChild className="flex items-center gap-2">
+          <h2>
+            {title}
+            <Badge variant={connected ? 'default' : 'outline'}>
+              {connected ? 'Key saved' : 'No key'}
+            </Badge>
+          </h2>
         </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
@@ -57,24 +61,24 @@ function KeyCard({
               void run(() => api('/keys', { apiKey }), 'Key saved. regulations.gov accepted it.');
             }}
           >
-            {error && <Notice>{error}</Notice>}
             <KeyField
               label={connected ? 'Replace key' : 'regulations.gov API key'}
               required
               value={apiKey}
               onChange={setApiKey}
+              error={error}
             />
             <div className="flex flex-wrap gap-3">
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" aria-disabled={busy}>
                 Check and save
               </Button>
               {connected && (
                 <Button
                   type="button"
                   variant="outline"
-                  disabled={busy}
+                  aria-disabled={busy}
                   onClick={() =>
-                    run(
+                    void run(
                       () => api('/keys/delete', {}),
                       'Key removed. Federal Register and eCFR remain available.',
                     )
@@ -94,6 +98,12 @@ function KeyCard({
 export function Account() {
   const { data, error, reload } = useLoad(() => api<Keys>('/account'), '/account');
   const [notice, setNotice] = useState<string>();
+  // After a change, move focus to its confirmation: the button that made it may be gone
+  // (a removed key's card no longer offers "Remove key").
+  const noticeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (notice) noticeRef.current?.focus();
+  }, [notice]);
   if (error)
     return (
       <Shell title="Your account">
@@ -108,7 +118,9 @@ export function Account() {
       description={<SignedInAs email={data.email} />}
       action={<SignOut then="/" />}
     >
-      {notice && <Notice kind="success">{notice}</Notice>}
+      <div ref={noticeRef} tabIndex={-1} className="grid gap-3 outline-none empty:hidden">
+        {notice && <Notice kind="success">{notice}</Notice>}
+      </div>
       <KeyCard
         title="Personal key"
         description="Used by your regulations.gov connections. It is never displayed again."

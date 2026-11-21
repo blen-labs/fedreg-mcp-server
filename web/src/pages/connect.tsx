@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KeyField } from '@/components/fields';
-import { Loading, Notice, Shell, SignedInAs, SignOut } from '@/components/shell';
+import { Notice } from '@/components/kit/notice';
+import { Loading, Shell, SignedInAs, SignOut } from '@/components/kit/shell';
 import { api, type Connection, type Keys } from '@/lib/api';
 import { useFlow } from '@/lib/flow';
 import { useLoad } from '@/lib/use-load';
@@ -18,6 +19,7 @@ export function Connect() {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   async function send(decision: 'continue' | 'deny') {
+    if (busy) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -71,10 +73,10 @@ export function Connect() {
           <p className="text-muted-foreground text-xs">Federal Register and eCFR work without a key.</p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" aria-disabled={busy}>
             Continue
           </Button>
-          <Button type="button" variant="outline" disabled={busy} onClick={() => send('deny')}>
+          <Button type="button" variant="outline" aria-disabled={busy} onClick={() => void send('deny')}>
             Cancel
           </Button>
         </div>
