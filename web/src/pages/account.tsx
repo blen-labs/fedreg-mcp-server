@@ -122,7 +122,7 @@ export function Account() {
         {notice && <Notice kind="success">{notice}</Notice>}
       </div>
       <KeyCard
-        title="Personal key"
+        title="regulations.gov API key"
         description="Used by your regulations.gov connections. It is never displayed again."
         connected={data.personal.connected}
         editable
