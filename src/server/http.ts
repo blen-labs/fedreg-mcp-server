@@ -127,7 +127,10 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       onerror: (err) => log.warn('mcp.handler.error', { error: truncate(err.message) }),
     },
   );
+  // The adapter buffers the body before the handler sees it (its own default is 4 MiB), so it gets
+  // the same cap: an oversized request is refused while it is still arriving.
   const nodeHandler = toNodeHandler(mcpHandler, {
+    maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     onerror: (err) => log.warn('mcp.adapter.error', { error: truncate(err.message) }),
   });
 

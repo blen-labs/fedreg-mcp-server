@@ -244,9 +244,11 @@ export async function createAccountApp(
     next();
   });
   const mcpNode = toNodeHandler(mcp, {
+    maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     onerror: () => log.warn('account.mcp_http_error'),
   });
   const publicNode = toNodeHandler(publicMcp, {
+    maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     onerror: () => log.warn('account.public_mcp_http_error'),
   });
   // In memory per replica, like the base transport's limiter it mirrors.
