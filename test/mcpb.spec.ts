@@ -21,6 +21,8 @@ describe('mcpb manifest', () => {
     expect(m.version).toBe('9.9.9');
     expect(m.compatibility.runtimes.node).toBe(pkg.engines.node);
     // Keys come from the host's secure user_config, never baked into the bundle.
+    // MCPB manifest placeholder syntax, not a template literal.
+    // eslint-disable-next-line no-template-curly-in-string
     expect(m.server.mcp_config.env.FEDREG_REGS_API_KEY).toBe('${user_config.regs_api_key}');
     expect(m.user_config.regs_api_key?.sensitive).toBe(true);
     // Legacy DXT keys must not reappear at the top level.

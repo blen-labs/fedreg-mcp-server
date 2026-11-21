@@ -26,6 +26,13 @@ export default tseslint.config(
       'no-script-url': 'error',
       'no-throw-literal': 'error',
       'prefer-promise-reject-errors': 'error',
+      // Core rules kept from the Biome configuration this repository used before.
+      'no-template-curly-in-string': 'error',
+      'default-case-last': 'error',
+      'array-callback-return': 'error',
+      'no-self-compare': 'error',
+      radix: 'error',
+      'no-constructor-return': 'error',
     },
   },
 

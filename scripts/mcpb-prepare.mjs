@@ -41,11 +41,14 @@ export function buildManifest(pkg) {
       entry_point: 'dist/bin.js',
       mcp_config: {
         command: 'node',
-        // ${__dirname} is expanded by the MCPB host to the unpacked bundle dir.
+        // ${__dirname} is expanded by the MCPB host to the unpacked bundle dir. The placeholders
+        // here and in env below are MCPB manifest syntax, deliberately not template literals.
+        /* eslint-disable no-template-curly-in-string */
         args: ['${__dirname}/dist/bin.js'],
         // The regulations.gov key is personal; the host prompts for it and keeps it in its secure
         // store. Left empty, regs.* stays disabled and fr.* and ecfr.* work without any key.
         env: { FEDREG_REGS_API_KEY: '${user_config.regs_api_key}' },
+        /* eslint-enable no-template-curly-in-string */
       },
     },
     user_config: {
