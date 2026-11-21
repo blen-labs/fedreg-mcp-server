@@ -49,6 +49,9 @@ jobs:
           deno-version: v2.9.8
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level moderate
+      # The documentation site (site/) has its own lockfile; the Docker job builds it.
+      - run: pnpm audit --audit-level moderate
+        working-directory: site
       - run: pnpm typecheck
       - run: pnpm lint
       # Build before testing: the account frontend test serves the built dist/web bundle.
@@ -56,10 +59,10 @@ jobs:
       - run: pnpm test
 
   accessibility:
-    # The portal in a real browser: axe-core (WCAG 2.0-2.2 A/AA) on every page and state, light and
-    # dark, 1280 and 320 px, plus landmark, focus and announcement checks (web/e2e). Manual checks
-    # are in docs/accessibility.md.
-    name: accessibility (portal)
+    # The portal and the documentation site in a real browser: axe-core (WCAG 2.0-2.2 A/AA) on
+    # every page and state, light and dark, 1280 and 320 px, plus landmark, focus and announcement
+    # checks (web/e2e). Manual checks are in docs/accessibility.md.
+    name: accessibility (portal + docs)
     runs-on: ubuntu-latest
     # The signed-in journey (web/e2e/journey.spec.ts) runs the real account server.
     services:
@@ -83,8 +86,12 @@ jobs:
         with:
           node-version: '26'
           cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            site/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: site
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.9.8

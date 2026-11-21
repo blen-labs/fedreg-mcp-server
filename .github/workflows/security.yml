@@ -2,7 +2,8 @@ name: security
 
 # Daily dependency audit of the unchanged lockfiles. CI audits only when something is pushed, so
 # an advisory published against a quiet main would otherwise surface first as an unrelated PR
-# failing its audit gate. scripts/security-audit.mjs runs the same audit as CI on the lockfile, and also checks that every `auditConfig.ignoreGhsas` exception still deserves
+# failing its audit gate. scripts/security-audit.mjs runs the same audit as CI on the server and
+# site/ lockfiles, and also checks that every `auditConfig.ignoreGhsas` exception still deserves
 # its place (it fails once the advisory is withdrawn or gets a fix).
 #
 # Findings open one tracking issue (or comment on it); a green run closes it. When the audit
@@ -43,16 +44,16 @@ jobs:
           node-version: '26'
       # Exit 0 clean, 1 a person has to act, 2 the audit service could not be reached.
       # The issue lookups list open issues directly (no search index, which lags new issues).
-      - name: Audit the lockfile
+      - name: Audit the server and the documentation site
         id: audit
         run: |
           set +e
-          node scripts/security-audit.mjs .
+          node scripts/security-audit.mjs . site
           code=$?
           if [ "$code" -eq 2 ]; then
             echo "::warning::audit service error; retrying in 60 s"
             sleep 60
-            node scripts/security-audit.mjs .
+            node scripts/security-audit.mjs . site
             code=$?
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
