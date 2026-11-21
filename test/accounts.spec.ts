@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, get as httpGet, type Server } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Pool } from 'pg';
@@ -285,6 +285,37 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const api = await fetch(`${config.origin}/no-such-page`, { headers: { accept: 'application/json' } });
     expect(api.status).toBe(404);
     expect(await api.text()).toBe('Not found');
+  });
+  // The policy URLs are registered as the connector's privacy policy, so their text must be in the
+  // HTML itself (web/prerender.ts), not only rendered by the script. node:http: no JavaScript runs.
+  it.skipIf(!webBuilt)('serves the policy pages with their text in the HTML, without running JavaScript (needs pnpm build)', async () => {
+    const { port, host } = new URL(config.origin);
+    const get = (path: string) => new Promise<{ status?: number; csp?: string | string[]; body: string }>((resolve, reject) =>
+      httpGet({ host: '127.0.0.1', port, path, headers: { host } }, (res) => {
+        let body = '';
+        res.setEncoding('utf8').on('data', (chunk: string) => (body += chunk)).on('end', () => resolve({ status: res.statusCode, csp: res.headers['content-security-policy'], body }));
+      }).on('error', reject));
+    const pages = [
+      { path: '/privacy-policy', title: 'Privacy policy', source: 'privacy-policy.md' },
+      { path: '/terms', title: 'Terms of service', source: 'terms.md' },
+    ];
+    const plain = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
+    for (const { path, title, source } of pages) {
+      const headings = [...readFileSync(new URL(`../legal/${source}`, import.meta.url), 'utf8').matchAll(/^## (.+)$/gm)].map((m) => m[1]!);
+      expect(headings.length).toBeGreaterThan(3);
+      for (const url of [path, `${path}/`]) {
+        const page = await get(url);
+        expect(page.status, url).toBe(200);
+        expect(page.csp).toContain("script-src 'self'");
+        expect(page.body).toMatch(new RegExp(`<title>${title} · `));
+        expect(page.body).toMatch(new RegExp(`<h1[^>]*>${title}</h1>`));
+        expect(page.body).toContain('<main id="main"');
+        const text = plain(page.body);
+        for (const heading of headings) expect(text, heading).toContain(heading);
+        expect(page.body).toContain('<script type="module"');
+        expect(page.body).not.toMatch(/<script(?![^>]*\bsrc=)/);
+      }
+    }
   });
   it('validates the separate connection step, preserves saved keys on failure, and allows cancellation', async () => {
     const { oauth_query, state } = await beginAuthorization();

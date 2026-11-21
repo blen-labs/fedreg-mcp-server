@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, hydrateRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import './index.css';
 
@@ -17,7 +17,8 @@ const applyTheme = () => document.documentElement.classList.toggle('dark', dark.
 applyTheme();
 dark.addEventListener('change', applyTheme);
 
-createRoot(document.getElementById('root')!).render(
+const root = document.getElementById('root')!;
+const app = (
   <StrictMode>
     <BrowserRouter>
       <Routes>
@@ -32,5 +33,10 @@ createRoot(document.getElementById('root')!).render(
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>
-  </StrictMode>,
+  </StrictMode>
 );
+
+// The policy pages arrive prerendered (web/prerender.ts): hydrate that markup in place, so nothing
+// flashes and focus and the skip link keep working. Every other page starts from an empty root.
+if (root.hasChildNodes()) hydrateRoot(root, app);
+else createRoot(root).render(app);

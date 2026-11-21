@@ -44,7 +44,9 @@ function registeredRedirects(body: Buffer): unknown {
   }
 }
 /** Client-side routes of the portal (web/src/main.tsx), served as index.html. */
-const PORTAL_ROUTES = ['/', '/sign-in', '/connect', '/consent', '/account', '/privacy-policy', '/terms', '/error'];
+const PORTAL_ROUTES = ['/', '/sign-in', '/connect', '/consent', '/account', '/error'];
+/** Portal routes with their own prerendered page in dist/web (web/vite.config.ts). */
+const PRERENDERED_ROUTES: Record<string, string> = { '/privacy-policy': 'privacy-policy.html', '/terms': 'terms.html' };
 const PORTAL_CSP =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 
@@ -205,14 +207,20 @@ export async function createAccountApp(
       res.redirect(301, `${DOCS_PATH}/${query === undefined ? '' : `?${query}`}`);
     });
   }
-  // Production reads the built page once; development rereads it so `pnpm dev:web` rebuilds show.
-  const loadIndex = () => readFile(resolve(webRoot, 'index.html'), 'utf8').catch(() => undefined);
-  let indexHtml: string | undefined;
-  const sendPortal = async (res: express.Response, status = 200) => {
-    const html = config.production ? (indexHtml ??= await loadIndex()) : await loadIndex();
+  // Production reads each built page once; development rereads them so `pnpm dev:web` rebuilds show.
+  const pages = new Map<string, string>();
+  const loadPage = (file: string) => readFile(resolve(webRoot, file), 'utf8').catch(() => undefined);
+  const sendPortal = async (res: express.Response, status = 200, file = 'index.html') => {
+    const html = config.production ? (pages.get(file) ?? (await loadPage(file))) : await loadPage(file);
     if (!html) return res.status(503).send('The web interface is not built. Run pnpm build.');
+    if (config.production) pages.set(file, html);
     res.status(status).set('Content-Security-Policy', PORTAL_CSP).type('html').send(html);
   };
+  // The policy pages are prerendered at build time (web/prerender.ts), so their text is in the
+  // HTML for clients that do not run JavaScript: crawlers, link checkers, directory reviewers.
+  app.get(Object.keys(PRERENDERED_ROUTES), async (req, res) => {
+    await sendPortal(res, 200, PRERENDERED_ROUTES[req.path.replace(/(?<=.)\/$/, '')]);
+  });
   app.get(PORTAL_ROUTES, async (_req, res) => {
     await sendPortal(res);
   });
