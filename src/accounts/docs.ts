@@ -68,9 +68,12 @@ export function docsHandler(root: string): express.Handler | undefined {
     files(req, res, (error?: unknown) => {
       // A read failure (5xx) is not a missing page; only 404s and rejected paths fall through.
       if (error) {
-        // serve-static set the file's headers (Content-Length, caching) before the read failed; an
-        // error response must not carry them, or a 500 is cached as the page.
-        for (const name of res.getHeaderNames()) res.removeHeader(name);
+        // serve-static set the file's headers (Content-Length, caching) before the read failed; the
+        // error response must not carry them (a 500 cached as the page). Earlier middleware's security
+        // headers stay.
+        for (const name of ['content-length', 'content-type', 'last-modified', 'etag', 'accept-ranges', 'content-range'])
+          res.removeHeader(name);
+        res.setHeader('Cache-Control', 'no-store');
         return next(error);
       }
       res.status(404).set({ 'Content-Security-Policy': policy, 'Cache-Control': 'no-store' }).type('html').send(notFound);
