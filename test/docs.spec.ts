@@ -75,7 +75,7 @@ describe('documentation site handler', () => {
     try {
       const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/docs/locked.html`);
       expect(res.status).toBe(500);
-      expect(res.headers.get('cache-control')).toBeNull();
+      expect(res.headers.get('cache-control')).toBe('no-store');
       expect(await res.text()).toBe('error');
     } finally {
       chmodSync(locked, 0o600);
