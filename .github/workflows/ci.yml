@@ -159,7 +159,7 @@ jobs:
           curl -fsS -X POST http://127.0.0.1:8080/mcp -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
             -H 'mcp-protocol-version: 2026-07-28' -H 'mcp-method: tools/call' -H 'mcp-name: execute' \
             -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"execute","arguments":{"code":"return 1 + 41"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"ci","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
-            | grep -q '\\"value\\": 42'
+            | grep -q '"structuredContent":{[^}]*"value":42'
           docker rm -f smoke
 
   conventional-commits:

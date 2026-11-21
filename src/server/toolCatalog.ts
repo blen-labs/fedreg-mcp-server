@@ -15,9 +15,50 @@ export interface ToolDescriptor {
   description: string;
   annotations: ToolAnnotations;
   inputSchema: Record<string, unknown>;
+  /** JSON Schema of the structured result (`structuredContent`). */
+  outputSchema: Record<string, unknown>;
   /** `signal` aborts when the client cancels the request or disconnects. */
   handler: (args: unknown, ctx?: { signal?: AbortSignal }) => Promise<unknown>;
+  /** True when a returned result is a tool execution failure (MCP `isError`). */
+  isFailure?: (result: unknown) => boolean;
 }
+
+const ENTRY_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' }, kind: { type: 'string', enum: ['endpoint', 'field'] }, binding: { type: 'string' },
+    description: { type: 'string' }, signature: { type: 'string' }, example: { type: 'string' }, score: { type: 'number' },
+  },
+  required: ['id', 'kind', 'binding', 'description'],
+} as const;
+
+export const OUTPUT_SCHEMAS = {
+  search_api: {
+    type: 'object',
+    properties: { hits: { type: 'array', items: ENTRY_SCHEMA }, note: { type: 'string' } },
+    required: ['hits', 'note'],
+  },
+  describe_schema: {
+    type: 'object',
+    properties: { found: { type: 'boolean' }, entries: { type: 'array', items: ENTRY_SCHEMA }, message: { type: 'string' } },
+    required: ['found'],
+  },
+  execute: {
+    type: 'object',
+    properties: {
+      ok: { type: 'boolean', description: 'false when the code threw, timed out, or broke a limit; see error' },
+      value: { description: 'The JSON value the code returned' },
+      logs: { type: 'array', items: { type: 'string' } },
+      error: {
+        type: 'object',
+        properties: { name: { type: 'string' }, message: { type: 'string' }, status: { type: 'number' } },
+        required: ['name', 'message'],
+      },
+      durationMs: { type: 'number' },
+    },
+    required: ['ok', 'logs', 'durationMs'],
+  },
+} as const;
 
 export interface CatalogDeps {
   sdk: Sdk;
@@ -44,6 +85,7 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
       description:
         `BM25 search over the API endpoints and curated field dictionary for all bound sources (${names}). Returns method signatures and JavaScript examples for use in execute.`,
       inputSchema: zodToJsonSchema(SearchApiInput),
+      outputSchema: OUTPUT_SCHEMAS.search_api,
       handler: async (args) => searchApi(SearchApiInput.parse(args), deps.corpus),
     },
     {
@@ -53,6 +95,7 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
       description:
         `Look up an endpoint or field by exact dotted id (path) or by namespace prefix. Use to drill into the bound source surfaces (${namespaces}).`,
       inputSchema: zodToJsonSchema(DescribeSchemaInput),
+      outputSchema: OUTPUT_SCHEMAS.describe_schema,
       handler: async (args) => describeSchema(DescribeSchemaInput.parse(args), deps.corpus.entries),
     },
     {
@@ -64,7 +107,9 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
       description:
         `Run JavaScript inside a sandbox (no net, fs, env, or subprocess). Plain JS only — TypeScript type annotations are rejected. Globals: ${names}. Top-level await is allowed; \`return\` the value you want as the result.`,
       inputSchema: zodToJsonSchema(ExecuteInput),
+      outputSchema: OUTPUT_SCHEMAS.execute,
       handler: async (args, ctx) => execute(ExecuteInput.parse(args), deps, { ...requestCtx, ...(ctx?.signal ? { signal: ctx.signal } : {}) }),
+      isFailure: (result) => (result as { ok?: unknown })?.ok === false,
     },
   ];
 }

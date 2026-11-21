@@ -187,9 +187,9 @@ errors), `SandboxUnavailable` (no runner), and a timeout when `timeoutMs` is
 exceeded.
 
 Inside `execute` a thrown error is captured by `execute`'s own
-`{ ok: false, error: { name, message, status? } }` envelope and surfaces to
-the MCP client as a normal tool result (no `isError` field) whose text block
-contains that structured error JSON — inspect `ok`, not `isError`.
+`{ ok: false, error: { name, message, status? } }` envelope. The MCP client
+receives that envelope as `structuredContent` (and as compact JSON text) with
+`isError: true`, so a failed run is visible without parsing the text.
 
 ## Style guidelines for sandboxed code
 

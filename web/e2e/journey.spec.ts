@@ -84,7 +84,7 @@ test('save a key, connect an assistant, run a program, sign out', async ({ page,
     name: 'execute',
     arguments: { code: 'const r = await regs.dockets.get("EPA-HQ-OAR-2021-0208"); return r.data.attributes.title;' },
   });
-  expect(JSON.stringify(result.content)).toContain('Journey docket');
+  expect(result.structuredContent).toMatchObject({ ok: true, value: 'Journey docket' });
   await client.close();
 
   // 4. Sign out from the account page; the header then offers sign-in again.

@@ -24,10 +24,7 @@ child.stdout.on('data', chunk => {
       send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'execute', arguments: { code: 'return 1 + 41' } } });
     } else if (msg.id === 2) {
       clearTimeout(timer);
-      // This server returns the execute result as JSON text content.
-      let result;
-      try { result = JSON.parse(msg.result?.content?.[0]?.text ?? 'null'); } catch { result = undefined; }
-      const ok = result?.ok === true && result.value === 42;
+      const ok = msg.result?.structuredContent?.ok === true && msg.result.structuredContent.value === 42;
       console.log(ok ? 'mcpb smoke: execute returned 42' : `mcpb smoke: unexpected ${line.slice(0, 500)}`);
       child.kill();
       process.exit(ok ? 0 : 1);

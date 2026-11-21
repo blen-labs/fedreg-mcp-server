@@ -260,9 +260,11 @@ describe('Streamable HTTP transport', () => {
       arguments: { query: 'electronic code of federal regulations search', k: 3 },
     });
     expect(search.status).toBe(200);
-    const sb = search.body as { result?: { content?: Array<{ type: string; text: string }> } };
+    const sb = search.body as { result?: { content?: Array<{ type: string; text: string }>; structuredContent?: unknown } };
     const text = sb?.result?.content?.[0]?.text ?? '';
     const parsed = JSON.parse(text) as { hits: Array<{ id: string }> };
+    // The same object is delivered as structuredContent (the tool declares an outputSchema).
+    expect(sb.result?.structuredContent).toEqual(parsed);
     expect(parsed.hits.length).toBeGreaterThan(0);
     expect(parsed.hits.some(h => h.id.startsWith('ecfr.'))).toBe(true);
   });
@@ -275,14 +277,25 @@ describe('Streamable HTTP transport', () => {
       arguments: { code: 'return 1 + 2', timeoutMs: 3000 },
     });
     expect(exec.status).toBe(200);
-    const eb = exec.body as { result?: { content?: Array<{ text: string }> } };
+    const eb = exec.body as { result?: { content?: Array<{ text: string }>; structuredContent?: unknown } };
     const execText = eb?.result?.content?.[0]?.text ?? '';
     const execResult = JSON.parse(execText) as { ok: boolean; value?: unknown; error?: { name: string } };
+    expect(eb.result?.structuredContent).toEqual(execResult);
     if (execResult.ok) {
       expect(execResult.value).toBe(3);
     } else {
       expect(['SandboxUnavailable', 'PolicyError']).toContain(execResult.error?.name);
     }
+  });
+
+  it('returns a failed execution as isError with the full envelope in structuredContent', async () => {
+    // eval is rejected by the AST preflight, so no sandbox runner is needed.
+    const exec = await rpc('tools/call', { name: 'execute', arguments: { code: 'return eval("1")' } });
+    expect(exec.status).toBe(200);
+    const body = exec.body as { result?: { isError?: boolean; content?: Array<{ text: string }>; structuredContent?: { ok: boolean; error?: { name: string }; logs: string[] } } };
+    expect(body.result?.isError).toBe(true);
+    expect(body.result?.structuredContent).toMatchObject({ ok: false, logs: [], error: { name: 'PolicyError' } });
+    expect(JSON.parse(body.result!.content![0]!.text)).toEqual(body.result?.structuredContent);
   });
 
   it('execute can call into fr.* SDK and receive mocked HTTP response', async () => {

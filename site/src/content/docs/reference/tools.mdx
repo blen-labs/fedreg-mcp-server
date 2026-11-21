@@ -3,7 +3,8 @@ title: Tools
 description: Inputs, results, and limits of search_api, describe_schema, and execute.
 ---
 
-The server has three tools. All three are read-only. Each result is JSON text.
+The server has three tools. All three are read-only. Each result is compact JSON text, with the
+same object as structured content. Each tool declares an output schema for it.
 
 ## search_api
 
@@ -41,9 +42,9 @@ Runs JavaScript in the sandbox, with `fr`, `ecfr`, and `regs` as globals.
 A run that succeeds returns `{ ok: true, value, logs, durationMs }`, where `value` is what the
 program returned.
 
-A run that fails returns `{ ok: false, error: { name, message, status? }, logs, durationMs }`.
-It is a normal tool result, so read `ok`. The [SDK reference](/reference/sdk/#errors) lists the
-error names.
+A run that fails returns `{ ok: false, error: { name, message, status? }, logs, durationMs }` and
+is marked as an error, so the assistant sees what went wrong. The
+[SDK reference](/reference/sdk/#errors) lists the error names.
 
 ### Limits of one run
 
