@@ -55,6 +55,43 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
+  accessibility:
+    # The portal in a real browser: axe-core (WCAG 2.0-2.2 A/AA) on every page and state, light and
+    # dark, 1280 and 320 px, plus landmark, focus and announcement checks (web/e2e). Manual checks
+    # are in docs/accessibility.md.
+    name: accessibility (portal)
+    runs-on: ubuntu-latest
+    # The signed-in journey (web/e2e/journey.spec.ts) runs the real account server.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: fedreg-ci
+          POSTGRES_DB: fedreg_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:fedreg-ci@localhost:5432/fedreg_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.9.8
+      # The browser version is pinned by @playwright/test in the lockfile.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:web
+
   package:
     name: npm package + MCPB bundle
     runs-on: ubuntu-latest
