@@ -1,39 +1,4 @@
-import type * as React from 'react';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-
-/** A labeled input with optional help text. */
-export function Field({
-  id,
-  label,
-  help,
-  ...props
-}: React.ComponentProps<typeof Input> & {
-  id: string;
-  label: React.ReactNode;
-  help?: React.ReactNode;
-}) {
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input id={id} name={id} aria-describedby={help ? `${id}-help` : undefined} {...props} />
-      {help && (
-        <p id={`${id}-help`} className="text-muted-foreground text-xs">
-          {help}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/** A link to another site, opened in a new tab. */
-function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-4">
-      {children}
-    </a>
-  );
-}
+import { ExternalLink, Field } from '@/components/kit/field';
 
 /** The regulations.gov API key input used on the key page and the account page. */
 export function KeyField({
@@ -41,11 +6,14 @@ export function KeyField({
   required,
   value,
   onChange,
+  error,
 }: {
   label: string;
   required: boolean;
   value: string;
   onChange: (value: string) => void;
+  /** Why the last save failed, read with the field. */
+  error?: string;
 }) {
   return (
     <Field
@@ -56,7 +24,9 @@ export function KeyField({
       minLength={40}
       maxLength={40}
       pattern="[A-Za-z0-9]{40}"
+      title="40 letters and digits"
       required={required}
+      error={error}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       help={

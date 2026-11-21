@@ -6,23 +6,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-11-21
 
+### Breaking
+- return structured results and mark failed runs as errors (tools)
+- fail closed on HTTP auth and run hosted code only in Deno (auth)
 
+### Added
+- let a server without accounts hide sign-in (kit)
+- let product.mjs override page labels (site)
+- return structured results and mark failed runs as errors (tools)
+- serve the documentation site at /docs (accounts)
+- move the portal onto the shared kit with a landing page and WCAG 2.2 AA fixes (web)
 
+### Fixed
+- name the code blocks Expressive Code makes scrollable (site)
+- on a read error drop only the file's headers (docs)
+- report docs-site read errors without the file's headers (docs)
+- keep queueMicrotask in the Deno worker (sandbox)
+- cap the request body in the Node adapter too (http)
+- prerender the policy pages so they read without JavaScript (web)
+- tie only key problems to the key field (portal)
+- accept hosted connectors' Origin on the signed-in MCP endpoint (accounts)
+- accept hosted connectors' Origin on the signed-in MCP endpoint (accounts)
+- complete the third-party notices and describe regulations.gov pacing accurately
+- keep platform health checks working, and require the public origin with auth (http)
+- name the account key card after the key it holds (web)
+- say when regulations.gov works without an account (web)
+- serve portal error and not-found pages, and validate MCP Origin in the CORS middleware (accounts)
+- end orphaned supervisors and cap anonymous executions per client (sandbox)
+- cap concurrent executions and stop cancelled work (execute)
+- validate Origin on /mcp/account (accounts)
+- fail closed on HTTP auth and run hosted code only in Deno (auth)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+### Changed
+- declare the service settings in .railway/railway.ts (railway)
+- expect no-store on a docs read error (docs)
+- declare the page-label overrides (none) in product.mjs (site)
+- tolerate EPIPE as well as ECONNRESET after an early 413 (http)
+- strip tags until none are left when reading policy text
+- fail the browser journey in CI instead of skipping it (web)
+- keep six core rules from the Biome setup (lint)
+- describe Origin handling as implemented
+- serve the docs site through the real /docs handler in browser tests (web)
+- always start the preview servers fresh (web)
+- note why the signed-in MCP endpoint accepts any Origin
+- v3 migration note, and accurate shared-key and rate-limit wording
+- describe structured results and the portal's third-party notices in CLAUDE.md
+- restructure the README and community files like the reference
+- ship the portal's third-party license texts (web)
+- drop the unused nock devDependency (deps)
+- release when the portal's bundled dependencies change (release)
+- audit and build the documentation site
+- check the documentation site with axe and build it for test:web (web)
+- build the documentation site into the image (docker)
+- add the documentation site (site)
+- accessibility conformance and portal notes
+- run the browser accessibility suite on every pull request
+- browser accessibility suite and signed-in journey with Playwright and axe (web)
+- update CLAUDE.md for the new toolchain, CI and release flow
+- gate releases on CI, cut and publish in separate jobs (release)
+- install the bundle from the frozen lockfile and smoke it (mcpb)
+- gate on audit, Node 24/26, required runners, package and Docker jobs
+- audit the lockfile daily and police audit exceptions (security)
+- run on node 26 with prebuilt isolated-vm and pinned Deno (docker)
+- lint with typescript-eslint and fix every finding (lint)
+- move to pnpm 12, Node 24/26 and TypeScript 6 with current dependencies
 
 ## [3.0.0] - 2026-11-21
 
@@ -35,71 +84,88 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - cap concurrent executions and stop cancelled work (execute)
 - validate Origin on /mcp/account (accounts)
 - fail closed on HTTP auth and run hosted code only in Deno (auth)
+
 ## [2.2.4] - 2026-11-13
 
 ### Changed
 - count only this worker's Deno children in the teardown test (#13) (sandbox)
+
 ## [2.2.3] - 2026-11-13
 
 ### Changed
 - Merge commit from fork
+
 ## [2.2.2] - 2026-11-10
 
 ### Changed
 - rename display name to Federal Regulations MCP (#12)
+
 ## [2.2.1] - 2026-10-13
 
 ### Fixed
 - accept valid regulations.gov keys and match Data.gov's sign-out (#11) (auth)
+
 ## [2.2.0] - 2026-10-13
 
 ### Added
 - keep /mcp open and move sign-in to /mcp/account (#10) (auth)
+
 ## [2.1.0] - 2026-10-13
 
 ### Added
 - add personal regulations.gov accounts with SAM.gov UX (#7) (auth)
+
 ## [2.0.11] - 2026-10-13
 
 ### Fixed
 - stop fr/ecfr calls from tripping federalregister.gov rate limits (#9) (upstream)
+
 ## [2.0.10] - 2026-10-13
 
 ### Fixed
 - key the per-IP rate limit on the real client behind proxies (#8) (http)
+
 ## [2.0.9] - 2026-10-08
 
 ### Fixed
 - request and decode gzip full-text responses (ecfr)
+
 ## [2.0.8] - 2026-09-23
 
 ### Changed
 - Correct company name and link in README
+
 ## [2.0.7] - 2026-09-23
 
 ### Changed
 - add hosted connector privacy policy and terms
+
 ## [2.0.6] - 2026-09-23
 
 ### Fixed
 - describe execute as plain JavaScript and sync docs with the SDK surface
 - restrict RPC dispatch and advertise tool safety metadata
+
 ## [2.0.5] - 2026-08-06
 
 ### Changed
 - move to Node 24 action runtimes and document the branch-only policy
+
 ## [2.0.4] - 2026-08-06
 
 ### Changed
 - enforce conventional commit subjects
+
 ## [2.0.3] - 2026-08-06
 
 ### Changed
 - pin the npm CLI version in the publish step
+
 ## [2.0.2] - 2026-08-06
 
 ### Changed
 - publish with npm CLI >= 11.5 for OIDC trusted publishing
+
 ## [2.0.1] - 2026-08-06
 
 ### Fixed
@@ -242,7 +308,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.2...v2.2.3

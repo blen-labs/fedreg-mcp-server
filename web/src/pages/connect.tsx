@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { KeyField } from '@/components/fields';
-import { Loading, Notice, Shell, SignedInAs, SignOut } from '@/components/shell';
-import { api, type Connection, type Keys } from '@/lib/api';
+import { Notice } from '@/components/kit/notice';
+import { Loading, Shell, SignedInAs, SignOut } from '@/components/kit/shell';
+import { api, failure, type Connection, type Failure, type Keys } from '@/lib/api';
 import { useFlow } from '@/lib/flow';
 import { useLoad } from '@/lib/use-load';
 
@@ -15,9 +16,10 @@ export function Connect() {
     `${window.location.pathname}${window.location.search}`,
   );
   const [apiKey, setApiKey] = useState('');
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<Failure>();
   const [busy, setBusy] = useState(false);
   async function send(decision: 'continue' | 'deny') {
+    if (busy) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -29,7 +31,7 @@ export function Connect() {
       window.location.assign(url);
     } catch (e) {
       setBusy(false);
-      setError(e instanceof Error ? e.message : 'Something went wrong.');
+      setError(failure(e));
     }
   }
   if (loadError)
@@ -45,7 +47,7 @@ export function Connect() {
       description={<SignedInAs email={data.email} />}
       action={<SignOut then={`/sign-in?${oauthQuery}`} />}
     >
-      {error && <Notice>{error}</Notice>}
+      {error && error.field !== 'apiKey' && <Notice>{error.message}</Notice>}
       <form
         className="grid gap-5"
         onSubmit={(e) => {
@@ -67,14 +69,15 @@ export function Connect() {
             required={false}
             value={apiKey}
             onChange={setApiKey}
+            error={error?.field === 'apiKey' ? error.message : undefined}
           />
           <p className="text-muted-foreground text-xs">Federal Register and eCFR work without a key.</p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" aria-disabled={busy}>
             Continue
           </Button>
-          <Button type="button" variant="outline" disabled={busy} onClick={() => send('deny')}>
+          <Button type="button" variant="outline" aria-disabled={busy} onClick={() => void send('deny')}>
             Cancel
           </Button>
         </div>

@@ -1,0 +1,61 @@
+---
+title: How it works
+description: The three tools, the sandbox that runs your assistant's code, and how the server stays inside the limits of the government APIs.
+---
+
+import Example from '../../components/Example.astro';
+import FlowDiagram from '../../components/FlowDiagram.astro';
+
+The server gives your assistant a small JavaScript SDK in place of dozens of narrow tools. The
+assistant writes the exact query it needs, and the server runs that code in a sandbox.
+
+<FlowDiagram />
+
+## Three tools
+
+The assistant uses them in this order.
+
+| Tool | What it does |
+| --- | --- |
+| `search_api` | Searches the SDK method documentation and the response fields. Returns signatures and ready-to-run examples. |
+| `describe_schema` | Looks up one entry, such as `fr.documents.search`, or lists a namespace, such as `regs.`. |
+| `execute` | Runs JavaScript in the sandbox, with `fr`, `ecfr`, and `regs` as globals. |
+
+All three are read-only. [Tools](/reference/tools/) has their inputs and limits.
+
+## What the assistant writes
+
+For "Which final rules did the EPA publish about methane since 2024?", the assistant can run a
+program like this one:
+
+<Example file="fr-search.js" />
+
+It then answers in plain English, and names the rules that it found.
+
+## The sandbox
+
+- The program has no network, file system, environment, or subprocess access.
+- The only way out is the `fr`, `ecfr`, and `regs` SDK. Each call goes to the server process,
+  which adds your key where one is needed and calls the government API.
+- Each run has a time limit, 15 seconds by default, and size limits for code, results, and logs.
+
+[Security](/security/) has more.
+
+## The limits of the government APIs
+
+The Federal Register and the eCFR need no key, but they see every user of a server as one client.
+regulations.gov limits each key, 1,000 requests an hour by default. So the server:
+
+- Allows each of the two public APIs at most 8 requests in flight and 10 started each second, and
+  queues the rest. A call that waits more than 15 seconds fails with `RateLimited`.
+- Pauses an API after a `429`, for the time in its `Retry-After` header, at most 5 seconds, then
+  retries that call once. It never retries a `429` from regulations.gov.
+- Caps the calls in one `execute` run, by default at 100 for the Federal Register and the eCFR
+  together and 30 for regulations.gov.
+- Paces regulations.gov for each key: a shared key gets a token bucket that holds 1,000 calls and
+  refills at 1,000 an hour; a hosted account's key gets a fixed hourly window of 1,000 calls.
+- Caches responses, for 5 minutes by default, so a repeated question does not spend quota.
+- Runs at most 2 programs at once for each signed-in person on a hosted server, and 8 in all.
+
+`Promise.all` in a program still works, and the server queues the calls it cannot send yet. A
+program can have at most 100 calls pending at once.

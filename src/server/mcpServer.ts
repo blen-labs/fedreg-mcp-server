@@ -19,22 +19,23 @@ export const MCP_PROTOCOL_VERSION = '2026-07-28';
 const LIST_CACHE_HINT = { ttlMs: 300_000, cacheScope: 'public' as const };
 
 /**
- * Converted tool input schemas, cached for the process lifetime.
+ * Converted tool input and output schemas, cached for the process lifetime.
  *
  * `fromJsonSchema` compiles an Ajv validator, and the SDK's default validator is a module
  * singleton that caches every compiled schema in a plain `Map` keyed by schema *identity*,
  * with no eviction. Since `buildMcpServer` runs per request and `buildCatalog` mints fresh
  * schema literals each time, converting inline would retain ~4 KB per call forever —
  * roughly 12 KB per HTTP request, unbounded. The three tool inputs derive only from
- * module-level Zod constants, so each is converted exactly once here.
+ * module-level Zod constants and the output schemas are module-level literals, so each is
+ * converted exactly once here.
  */
-const inputSchemaCache = new Map<string, ReturnType<typeof fromJsonSchema>>();
+const schemaCache = new Map<string, ReturnType<typeof fromJsonSchema>>();
 
-function cachedInputSchema(name: string, jsonSchema: unknown): ReturnType<typeof fromJsonSchema> {
-  let converted = inputSchemaCache.get(name);
+function cachedSchema(key: string, jsonSchema: unknown): ReturnType<typeof fromJsonSchema> {
+  let converted = schemaCache.get(key);
   if (!converted) {
     converted = fromJsonSchema(jsonSchema as JsonSchemaType);
-    inputSchemaCache.set(name, converted);
+    schemaCache.set(key, converted);
   }
   return converted;
 }
@@ -59,12 +60,19 @@ export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpS
         // validator, so arguments are checked here BEFORE the handler re-parses with Zod.
         // Note `zodToJsonSchema` emits `additionalProperties: false`, so unknown argument
         // keys are now rejected rather than silently stripped by Zod (see CHANGELOG).
-        inputSchema: cachedInputSchema(tool.name, tool.inputSchema),
+        inputSchema: cachedSchema(`in:${tool.name}`, tool.inputSchema),
+        outputSchema: cachedSchema(`out:${tool.name}`, tool.outputSchema),
       },
       async (args: unknown, ctx: { mcpReq?: { signal?: AbortSignal } }) => {
         try {
           const result = await tool.handler(args ?? {}, { signal: ctx?.mcpReq?.signal });
-          return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+          // Compact JSON for the model, the same object as structuredContent for clients, and
+          // isError for a failed execution (MCP tool-error convention) with the full envelope.
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            structuredContent: result as Record<string, unknown>,
+            ...(tool.isFailure?.(result) ? { isError: true } : {}),
+          };
         } catch (err) {
           const e = err as Error;
           log.warn('tool.error', { tool: tool.name, name: e.name, error: e.message });

@@ -7,30 +7,78 @@ to do before sending anything non-trivial, and we'll figure it out together.
 ## Ground rules
 
 - The server's whole reason for existing is to be a safe place to run untrusted
-  JavaScript against three public APIs. **Anything that weakens the sandbox is
+  JavaScript against three public U.S. government APIs. **Anything that weakens the sandbox is
   out of scope.** That includes adding `fetch`, `import`, filesystem, env,
   or subprocess access to the sandbox surface.
 - New SDK methods are welcome but must be paired with field/endpoint entries
   in the corpus so `search_api` and `describe_schema` can surface them. Each
-  source owns its own file — `schema/{fr,ecfr,regs}.json` — so add the entry to
-  the file for the source you're touching.
+  source owns its own file — `schema/{fr,ecfr,regs}.json` — and the corpus is
+  hand-written, not generated: add an endpoint entry (signature, description,
+  example) to the file for the source you're touching, with an example that runs
+  against the live API, and update `docs/sdk-reference.md`.
   Explicitly register each callable method in the source factory's `methods`
-  table as well. RPC dispatch only invokes registered methods; never expose a
-  generic HTTP client, cache, or other host implementation detail there.
-- Public API shape (the three tools, the `fr.*` / `ecfr.*` / `regs.*` globals)
-  is stable; breaking changes need a major version bump and a migration note.
+  table as well, and add it to `test/dispatch.spec.ts`. RPC dispatch only invokes
+  registered methods; never expose a generic HTTP client, cache, or other host
+  implementation detail there.
+- Respect the upstream limits: the Federal Register and the eCFR see every user of a
+  server as one client, and an api.data.gov key allows 1,000 regulations.gov requests
+  an hour. Don't raise the default concurrency or rates, and don't let a `429` from
+  regulations.gov be retried.
+- The regulations.gov key is personal. Don't add any path where one person's key
+  serves other people; in account mode each user's saved key serves only that user.
+- Authenticated HTTP serving runs user code only in a separate process (the Deno
+  runner); don't add an in-process fallback there.
+- Public API shape (the three tools, the `fr.*` / `ecfr.*` / `regs.*` globals) is the
+  contract; breaking changes need a major version bump and a migration note.
 
 ## Development
 
 ```bash
 pnpm install
-pnpm test          # vitest, ~1s
-pnpm typecheck     # tsc --noEmit
-pnpm lint          # eslint
-pnpm dev           # tsx src/bin.ts (stdio)
-pnpm dev -- --http # tsx src/bin.ts --http
-pnpm build         # tsc + chmod
+pnpm test                       # vitest, a few seconds; no keys or network needed
+pnpm typecheck                  # tsc --noEmit (src, test, web, web/e2e)
+pnpm lint                       # eslint: correctness and security rules, type-aware in src/
+pnpm test:web                   # Playwright + axe: portal and docs accessibility (builds both first)
+pnpm kit:check                  # the shared portal kit matches web/portal-kit.json
+pnpm dev                        # tsx src/bin.ts (stdio)
+pnpm dev --http --insecure      # local HTTP, no auth, bound to 127.0.0.1
+pnpm build                      # tsc + Vite (dist/web) + chmod
 ```
+
+Node 24 or 26 and pnpm 12 (pinned in `package.json`) are required. `pnpm test:web` needs
+Chromium once: `pnpm exec playwright install chromium`; with `TEST_DATABASE_URL` set it also
+runs the signed-in journey against a real server (needs Deno). TypeScript 6 is installed as
+`@typescript/typescript6`, which typescript-eslint needs.
+
+Account-mode tests (`test/accounts.spec.ts`) need Deno and a disposable
+PostgreSQL in `TEST_DATABASE_URL`; see [docs/accounts.md](docs/accounts.md#verification-and-rollout)
+for a one-line Docker setup. Set `FEDREG_REQUIRE_RUNNERS=1` (as CI does) to make
+missing runners or a missing database fail instead of skip. No test needs a key or the
+network: upstream HTTP is mocked. Never commit keys.
+
+The portal (`web/`) targets WCAG 2.2 AA and Section 508; see
+[docs/accessibility.md](docs/accessibility.md) for what is tested automatically and the manual
+checks. Its layout, landing page and UI primitives (`web/src/components/kit`, `components/ui`,
+`index.css`) are a kit shared byte for byte with BLEN's other MCP servers: product text goes in
+`web/src/brand.tsx`, and after changing a kit file run `pnpm kit:update` and copy the files and
+`web/portal-kit.json` to the other servers.
+
+The documentation site is in `site/` (Astro Starlight). The Docker image builds it and the
+hosted server serves it at `/docs` (`src/accounts/docs.ts`), so it deploys with the server;
+the CI Docker job builds it on every pull request. It is its own pnpm root with its own
+lockfile, so the server's install and audit never see its packages:
+
+```bash
+cd site
+pnpm install
+pnpm dev      # local preview
+pnpm build    # builds, validates the internal links, and checks the connect buttons
+pnpm og       # renders public/og.png, the picture shown with a shared link
+```
+
+Everything product-specific about the site is in `site/product.mjs`.
+Its SDK reference page is `docs/sdk-reference.md`, copied in at build time, and its
+recipes are the files in `examples/`. Edit those sources, not the site.
 
 The HTTP integration test (`test/http-integration.spec.ts`) exercises a real
 `http.Server` against the v2 SDK's `createMcpHandler`/`toNodeHandler` over `fetch`,
@@ -45,59 +93,126 @@ requests cannot catch a protocol misunderstanding shared by both sides.
 
 ## Sandbox runners
 
-- The primary runner is `isolated-vm`. On platforms where it compiles cleanly
-  (Linux/macOS/Windows on x64/arm64), `pnpm install` will build it.
-- The fallback runner shells out to `deno run --no-prompt` against a temporary
-  runner file (stdin is reserved for the host↔sandbox RPC channel). Install Deno
-  separately if you want to test that path: <https://docs.deno.com/runtime/getting_started/installation/>.
-- `pickSandbox('auto')` prefers `isolate`, then `deno`, then `unavailable`
-  (which surfaces a `SandboxUnavailable` error from `execute`).
+- `isolated-vm` 7 ships prebuilt binaries for Node 24 and 26 (macOS arm64, Linux
+  x64/arm64 glibc and musl, Windows x64); `pnpm install` needs no compiler.
+- The Deno runner starts `deno run --no-prompt` (no permissions) on a fixed
+  supervisor script and runs the user code in a Worker with its ambient globals
+  removed; the host owns the deadline and kills the process group. Install Deno to
+  test that path: <https://docs.deno.com/runtime/getting_started/installation/>.
+- `pickSandbox('auto')` prefers `isolate`, then `deno`, for single-user use. For
+  authenticated HTTP serving it allows only `deno` (and refuses `--sandbox isolate`).
+  With no runner, `execute` returns `SandboxUnavailable`.
+- Sandbox changes need positive AND negative tests for both runners
+  (`test/sandbox.spec.ts` runs its contract with `describe.each`). For lifecycle
+  fixes, check that the new test fails without the fix.
 
 ## What needs work
 
 - More fixtures and shape assertions for the eCFR `/full` endpoint.
+- Distributed rate limits for multi-replica deployments (today: one replica).
 - A small Cloudflare Workers deploy target sharing the core logic (today the
   HTTP transport is Node-only).
-- An "embedded" auth provider that mints/verifies short-lived HS256 tokens
-  end-to-end with a documented dev flow.
 - Schema entries for the few Federal Register fields not yet in
   `schema/fr.json`.
 
 ## Releasing
 
 Releases are **continuous** (`.github/workflows/release.yml`): every push to
-`main` is released — there is no Release PR and no batching.
+`main` that can change what users install is released — there is no Release PR
+and no batching.
 
 1. Land changes on `main` **via pull request** (never a direct push) using
    [Conventional Commits](https://www.conventionalcommits.org/)
    (`feat:`, `fix:`, `docs:`, `ci:`, …; add `!` or a `BREAKING CHANGE:` footer
-   for majors; CI enforces the format). The commit types determine the next SemVer version:
-   breaking → major, `feat` → minor, **everything else → at least a patch** —
-   every merge produces a tag and a CHANGELOG entry, by policy.
-2. On push, the workflow runs the full gates (typecheck, lint, test, build +
-   artifact check), then `scripts/release.mjs` computes the version, stamps
-   `package.json` and the `x-release-version` marker lines in
-   `src/server/mcpServer.ts` and `src/sdk/bindings.ts`, and prepends the
-   CHANGELOG section (logic lives in `scripts/release-lib.mjs`, covered by
-   `test/release.spec.ts`).
-3. The workflow pushes a `chore(release): vX.Y.Z` commit with the annotated
-   tag, creates the GitHub Release from the generated notes, and publishes to
-   npm. The release commit is pushed with `GITHUB_TOKEN`, which GitHub never
-   triggers workflows for — no release loop.
+   for majors; CI enforces the format). The commits since the last tag decide
+   whether there is a release at all, then the next SemVer version:
+   - **No release** when every commit is `build`, `chore`, `ci`, `docs`, `style`
+     or `test`, none of them touches a shipped path, and `package.json` changed in
+     no shipped field. The workflow reports `released=false` and nothing is
+     tagged or published; those commits ship with the next release and appear in
+     its CHANGELOG section. This is what Dependabot's dev-tooling (`build(deps-dev)`),
+     `site/` and Docker base-image (`build(deps)`) and Actions (`ci(deps)`) PRs are.
+   - **Release** for anything else: `feat`, `fix`, `perf`, `revert`, `refactor`
+     (it rewrites shipped code, so it releases even without a behavior change),
+     a breaking change of any type, or a non-conventional subject. Then breaking →
+     major, `feat` → minor, everything else → patch.
+   - **Shipped paths** release whatever the commit type: `src/`, `web/`, `legal/`
+     (bundled into the portal), `schema/`, `tsconfig.json`, `tsconfig.build.json`,
+     `LICENSE`, `NOTICE`, `.pnpmfile.cjs` and `scripts/mcpb-prepare.mjs` (the
+     Claude Desktop bundle). So does a change to a `package.json` field other than
+     `version`, `devDependencies` (except the bundled ones, below) and `packageManager`, including any script except
+     the dev-only ones (`dev`, `dev:web`, `test`, `test:watch`, `test:live`, `lint`,
+     `typecheck`): `build`, `build:web` and `prepack` decide `dist/`. A runtime
+     dependency bumped under a `build(deps)` subject therefore still releases
+     (Dependabot uses `fix(deps)` for those).
+   - **The bundle's production dependencies.** The MCPB bundle installs
+     `pnpm-lock.yaml` with the `overrides:` in `pnpm-workspace.yaml`, so
+     `release.mjs` compares the lockfile's production tree at the last tag with HEAD
+     (`pnpm ls --prod --lockfile-only`, from git, no install). A changed package there
+     releases, e.g. a transitive security fix landed as a lockfile-only or
+     `overrides:`-only commit. Dev-tooling lockfile churn does not, except for the portal's libraries:
+     React, radix-ui, Vite, Tailwind and the other `BUNDLED_DEV_DEPENDENCIES` are
+     devDependencies compiled into `dist/web`, which the package and the bundle ship,
+     so a change to their `package.json` entry or to anything they pull in releases too
+     (a test fails when `web/` imports a package missing from that list). The lists and
+     checks live in `scripts/release-lib.mjs` (`NO_RELEASE_TYPES`, `SHIPPED_PATHS`,
+     `DEV_ONLY_SCRIPTS`, `BUNDLED_DEV_DEPENDENCIES`, `changedManifestFields`,
+     `productionPackages`).
+   - **Not shipped, by decision:** `README.md`, `SECURITY.md` and the docs (the npm
+     page's README refreshes with the next release); `deploy/` (the Docker image is
+     built from the repository by the deployment, never by `release.yml`); `site/`,
+     `test/`, `.github/`.
+   - A dev-tooling bump can still change the build output (TypeScript, for example). To ship one right away, run
+     the release workflow from `main` (**Actions → release → Run workflow**) with
+     **force** checked: it releases the pending commits as a patch.
+2. On push, the `gates` job runs the complete CI workflow on that commit (audit,
+   typecheck, lint, build, tests on Node 24 and 26 with Postgres and both sandbox
+   runners, the npm-package/MCPB smoke test and the Docker smoke test). Then the
+   `cut` job (`contents: write`, dependencies installed with `--ignore-scripts`)
+   runs `scripts/release.mjs`, which computes the version, stamps `package.json`
+   and the `x-release-version` marker lines in `src/server/mcpServer.ts` and
+   `src/sdk/bindings.ts`, and prepends the CHANGELOG section (logic in
+   `scripts/release-lib.mjs`, covered by `test/release.spec.ts`); it builds, packs
+   the tarball, pushes a `chore(release): vX.Y.Z` commit with the annotated tag,
+   and creates the GitHub Release with the tarball and the Claude Desktop bundle
+   (`fedreg-mcp-server.mcpb`, which the documentation site's download button links to) attached. `main` requires PRs,
+   so the release commit is pushed as the org's release GitHub App, the ruleset's
+   only bypass actor (contents: write on this repository only). Its key is the
+   `RELEASE_APP_PRIVATE_KEY` secret and its client ID the `RELEASE_APP_CLIENT_ID`
+   variable, both in the `release` environment (deployable from `main` only); the
+   job mints a short-lived token just before the push and uses it only there.
+   App-token pushes trigger workflows, so the release commit's own run skips
+   on its `chore(release):` subject, and `release.mjs` ignores such commits (and
+   the files they touch): no release loop. A run with nothing to release still
+   runs the gates and builds, but stops before tagging and publishing.
+3. The `publish` job — holding only `id-token: write`, in the `npm` environment
+   (deployments allowed from `main` only) — downloads that exact tarball and
+   publishes it with `npm publish --provenance`. It never checks out the
+   repository or installs dependencies. No manual step: a merge to `main` that
+   passes the gates is on npm a few minutes later.
 4. **Recovery**: `gh workflow run release.yml --ref main -f republish=true`
-   re-runs the gates and republishes the *current* version to npm (no bump,
+   re-runs the gates and publishes the *current* version to npm (no bump,
    no tag) — for when a publish failed after a tag already existed.
 
 Publishing is **tokenless** via [npm Trusted
 Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC): the npm
-package settings register this repo's `release.yml` as a trusted publisher,
-so no npm token or secret exists anywhere; the job's `id-token: write`
-permission is what authenticates, and provenance is generated automatically.
+package settings register this repo's `release.yml` (and the `npm` environment) as
+a trusted publisher (allowed to `npm publish`), so no npm token or secret exists
+anywhere and nothing but this workflow on `main` can publish; the job's
+`id-token: write` permission is what authenticates, and provenance is attached
+(`--provenance`). Workflow actions are pinned to commit SHAs; Dependabot
+(`.github/dependabot.yml`) proposes updates for npm packages (server and `site/`),
+actions and the Docker base images. Patched versions of vulnerable transitive dev dependencies are
+pinned with `overrides:` in `pnpm-workspace.yaml`; remove an entry once its parent
+ships the fix. An advisory with no patched release is listed under
+`auditConfig.ignoreGhsas` there (and in `site/pnpm-workspace.yaml`), for dev tooling only,
+with a row in `test/audit-exceptions.spec.ts`, which fails if such a package becomes a
+production dependency. The daily `security` workflow flags an exception once its advisory
+is withdrawn or gets a fix; then remove it.
 The `files` field in `package.json` ships only `dist/`, `schema/`,
 `README.md`, `LICENSE`, `NOTICE`, `CHANGELOG.md`, and `SECURITY.md`.
 
-Breaking changes additionally need a migration note (see
-`docs/migration-v2.md` for the pattern).
+Breaking changes additionally need a migration note in `docs/`.
 
 ## Reporting security issues
 

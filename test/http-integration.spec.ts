@@ -1,5 +1,7 @@
+import { request as httpRequest } from 'node:http';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MockAgent } from 'undici';
+import type { Server } from 'node:http';
 import type { Tool } from '@modelcontextprotocol/server';
 import { expectToolMetadata } from './tool-metadata.js';
 import { startHttp, type HttpHandle } from '../src/server/http.js';
@@ -259,9 +261,11 @@ describe('Streamable HTTP transport', () => {
       arguments: { query: 'electronic code of federal regulations search', k: 3 },
     });
     expect(search.status).toBe(200);
-    const sb = search.body as { result?: { content?: Array<{ type: string; text: string }> } };
+    const sb = search.body as { result?: { content?: Array<{ type: string; text: string }>; structuredContent?: unknown } };
     const text = sb?.result?.content?.[0]?.text ?? '';
     const parsed = JSON.parse(text) as { hits: Array<{ id: string }> };
+    // The same object is delivered as structuredContent (the tool declares an outputSchema).
+    expect(sb.result?.structuredContent).toEqual(parsed);
     expect(parsed.hits.length).toBeGreaterThan(0);
     expect(parsed.hits.some(h => h.id.startsWith('ecfr.'))).toBe(true);
   });
@@ -274,14 +278,25 @@ describe('Streamable HTTP transport', () => {
       arguments: { code: 'return 1 + 2', timeoutMs: 3000 },
     });
     expect(exec.status).toBe(200);
-    const eb = exec.body as { result?: { content?: Array<{ text: string }> } };
+    const eb = exec.body as { result?: { content?: Array<{ text: string }>; structuredContent?: unknown } };
     const execText = eb?.result?.content?.[0]?.text ?? '';
     const execResult = JSON.parse(execText) as { ok: boolean; value?: unknown; error?: { name: string } };
+    expect(eb.result?.structuredContent).toEqual(execResult);
     if (execResult.ok) {
       expect(execResult.value).toBe(3);
     } else {
       expect(['SandboxUnavailable', 'PolicyError']).toContain(execResult.error?.name);
     }
+  });
+
+  it('returns a failed execution as isError with the full envelope in structuredContent', async () => {
+    // eval is rejected by the AST preflight, so no sandbox runner is needed.
+    const exec = await rpc('tools/call', { name: 'execute', arguments: { code: 'return eval("1")' } });
+    expect(exec.status).toBe(200);
+    const body = exec.body as { result?: { isError?: boolean; content?: Array<{ text: string }>; structuredContent?: { ok: boolean; error?: { name: string }; logs: string[] } } };
+    expect(body.result?.isError).toBe(true);
+    expect(body.result?.structuredContent).toMatchObject({ ok: false, logs: [], error: { name: 'PolicyError' } });
+    expect(JSON.parse(body.result!.content![0]!.text)).toEqual(body.result?.structuredContent);
   });
 
   it('execute can call into fr.* SDK and receive mocked HTTP response', async () => {
@@ -336,7 +351,7 @@ describe('Legacy 2025-era compatibility', () => {
 describe('Auth enforcement (OIDC, signed tokens from a local issuer)', () => {
   let secured: HttpHandle;
   let secBase: string;
-  let jwks: import('node:http').Server;
+  let jwks: Server;
   let issuerKey: SigningKey;
   let otherKey: SigningKey;
   const ISSUER = 'https://issuer.test';
@@ -417,6 +432,9 @@ describe('Auth enforcement (OIDC, signed tokens from a local issuer)', () => {
     await expect(startHttp(await deps(), { ...base, auth: { provider: 'generic-oidc', issuer: ISSUER, jwksUrl } })).rejects.toThrow(/AUDIENCE/);
     await expect(startHttp(await deps(), { ...base, auth: { provider: 'generic-oidc', audience: AUDIENCE, jwksUrl } })).rejects.toThrow(/ISSUER/);
     await expect(startHttp(await deps(), { ...base, host: '0.0.0.0', insecure: true, auth: { provider: 'none' } })).rejects.toThrow(/FEDREG_PUBLIC_ORIGIN/);
+    // Authenticated beyond loopback: allowed hosts alone cannot name the URL OAuth metadata advertises.
+    const oidc = { provider: 'generic-oidc' as const, issuer: ISSUER, audience: AUDIENCE, jwksUrl };
+    await expect(startHttp(await deps(), { ...base, host: '0.0.0.0', allowedHosts: ['mcp.example.com'], auth: oidc })).rejects.toThrow(/needs FEDREG_PUBLIC_ORIGIN/);
   });
 });
 
@@ -433,7 +451,7 @@ describe('Host validation (DNS rebinding)', () => {
     });
   };
   it('rejects a foreign Host even when Origin matches it, and accepts loopback', async () => {
-    expect(await raw('/health', { host: 'attacker.example' })).toBe(421);
+    expect(await raw('/health', { host: 'attacker.example' })).toBe(200); // platform health checks carry their own Host
     const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: meta() } });
     expect(await raw('/mcp', { host: 'attacker.example', origin: 'http://attacker.example', 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body)).toBe(421);
     expect(await raw('/health', { host: `127.0.0.1:${new URL(base).port}` })).toBe(200);
@@ -557,5 +575,23 @@ describe('Client disconnect cancels the execution', () => {
     } finally {
       await h.close();
     }
+  });
+});
+
+describe('request body cap', () => {
+  it('refuses an oversized body while it is still arriving', async () => {
+    // Announce 2 MiB but send only a little and never finish: a server that buffers the whole body
+    // before checking would wait forever; the cap must answer 413 from the length alone.
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest(`${base}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'content-length': String(2 * 1024 * 1024) },
+      }, (res) => { res.resume(); resolve(res.statusCode ?? 0); req.destroy(); });
+      // The server answers and closes before the body is done, so the write may fail with EPIPE or ECONNRESET.
+      req.on('error', (err) => { const code = (err as NodeJS.ErrnoException).code; if (code !== 'EPIPE' && code !== 'ECONNRESET') reject(err); });
+      req.write('{"jsonrpc":"2.0"');
+      setTimeout(() => reject(new Error('no response before the body finished')), 5000).unref();
+    });
+    expect(status).toBe(413);
   });
 });

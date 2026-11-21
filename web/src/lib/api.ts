@@ -2,9 +2,21 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** The form field the error is about (`apiKey`), or undefined for a page-level error. */
+    readonly field?: string,
   ) {
     super(message);
   }
+}
+
+/** A failed call as the page shows it: tied to a field, or a page-level notice. */
+export interface Failure {
+  message: string;
+  field?: string;
+}
+export function failure(e: unknown): Failure {
+  if (e instanceof ApiError) return { message: e.message, field: e.field };
+  return { message: e instanceof Error ? e.message : 'Something went wrong. Try again.' };
 }
 
 /** Calls this server's portal API as the signed-in browser. */
@@ -17,7 +29,11 @@ export async function api<T>(path: string, body?: object): Promise<T> {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new ApiError(data.error ?? 'Something went wrong. Try again.', response.status);
+    throw new ApiError(
+      data.error ?? 'Something went wrong. Try again.',
+      response.status,
+      typeof data.field === 'string' ? data.field : undefined,
+    );
   return data as T;
 }
 

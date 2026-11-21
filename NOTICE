@@ -13,3 +13,12 @@ This product fetches data from public U.S. government APIs:
   - FederalRegister.gov API v1 (U.S. Government Publishing Office / National Archives)
   - Electronic Code of Federal Regulations (eCFR) API
   - Regulations.gov API v4 (U.S. General Services Administration / api.data.gov)
+Use of those APIs is subject to their operators' terms. The regulations.gov API key is
+issued to an individual through api.data.gov and must not be shared.
+
+The endpoint and response-field dictionary in schema/fr.json, schema/ecfr.json and
+schema/regs.json is written by hand for this project; no third-party sample data is
+distributed with it.
+
+The web portal bundle (dist/web) includes third-party open-source packages; their
+license texts are collected at build time in dist/web/THIRD_PARTY_NOTICES.txt.

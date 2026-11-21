@@ -1,0 +1,42 @@
+---
+title: Recipes
+description: Three programs that your assistant can run with execute, and tips for programs of your own.
+---
+
+import Example from '../../components/Example.astro';
+
+Each program runs as written in `execute`. They are plain JavaScript with top-level `await` and
+`return`, and the repository tests each one.
+
+## Rules on a topic
+
+`fr.documents.search` with `conditions`, `fields`, `per_page`, and `order`.
+
+<Example file="fr-search.js" />
+
+## Where a topic appears in the CFR
+
+Counts by CFR hierarchy for one agency, then the best matching sections.
+
+<Example file="ecfr-search.js" />
+
+## Comments on a rule
+
+From a Federal Register rule to its regulations.gov document, then the public comments filed on
+it. This one needs a [regulations.gov key](/keys/).
+
+<Example file="regs-comments.js" />
+
+## Tips
+
+- **Filter first.** Each search takes one call, and a program has a call budget. One
+  well-filtered search is better than many lookups.
+- **Pass `fields` on every `fr.documents.search`.** Full documents are large.
+- **Start with a small `per_page`**, 5 to 25. `count` gives the total for `fr`, and
+  `meta.totalElements` for `regs`.
+- **Use `getMany`** to read up to about 20 documents in one request.
+- **Name a `part` for `ecfr.full`.** It returns the XML of a whole slice of the CFR.
+- **Return less.** A returned value over 8 MiB fails with `ResultTooLarge`.
+- **Use `facets`** to get counts by agency, topic, or date without the documents.
+
+The [SDK reference](/reference/sdk/) lists every method.

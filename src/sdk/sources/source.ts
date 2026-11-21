@@ -17,6 +17,9 @@ export interface Source extends SourceMeta {
 
 // Each registered function retains its concrete argument contract at registration.
 // Runtime arguments cross the sandbox bridge as data, never as host references.
+// Methods of every signature live in one table and are called with arguments the sandbox sent,
+// validated by each method itself, so the table is deliberately untyped at this boundary.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type RpcMethods = Readonly<Record<string, (...args: any[]) => unknown>>;
 
 export interface SourceConfig {

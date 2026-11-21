@@ -16,6 +16,8 @@ export interface AccountConfig {
   ipBurst?: number;
   /** Extra browser origins allowed on the anonymous /mcp (FEDREG_ALLOWED_ORIGINS), as in the base transport. */
   allowedOrigins?: string[];
+  /** Built documentation site served at /docs. Not configurable by env: the image puts it at docs-site/; tests point it at a fixture. */
+  docsRoot?: string;
 }
 
 /** `env` is passed in by src/bin.ts, the only module that reads process.env. */

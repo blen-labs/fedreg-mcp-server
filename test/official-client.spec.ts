@@ -11,6 +11,7 @@ import { buildSdk } from '../src/sdk/bindings.js';
 import { getSources } from '../src/sdk/sources/index.js';
 import { buildCorpus } from '../src/search/corpus.js';
 import { pickSandbox } from '../src/sandbox/index.js';
+import type { SandboxRunner } from '../src/sandbox/types.js';
 import type { CatalogDeps } from '../src/server/toolCatalog.js';
 import { SubjectQuota } from '../src/util/quotas.js';
 import { expectToolMetadata } from './tool-metadata.js';
@@ -42,11 +43,13 @@ const SOURCE_URLS = {
 
 let handle: HttpHandle;
 let url: URL;
+let sandbox: SandboxRunner;
 
 beforeAll(async () => {
+  sandbox = await pickSandbox('auto');
   const deps: CatalogDeps = {
     sdk: buildSdk(SOURCE_URLS),
-    sandbox: await pickSandbox('auto'),
+    sandbox,
     corpus: buildCorpus(getSources(SOURCE_URLS)),
     regsMaxCallsPerExecute: 30,
     regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000),
@@ -90,8 +93,64 @@ describe('official MCP client SDK', () => {
         name: 'search_api',
         arguments: { query: 'federal register documents search', k: 2 },
       });
+      // The client validates structuredContent against the advertised outputSchema before
+      // returning, so a result that does not conform makes callTool throw.
+      expect(called.isError).toBeFalsy();
       const text = (called.content as Array<{ text?: string }>)[0]?.text ?? '';
-      expect((JSON.parse(text) as { hits: unknown[] }).hits.length).toBeGreaterThan(0);
+      const structured = called.structuredContent as { hits: unknown[] };
+      expect(structured.hits.length).toBeGreaterThan(0);
+      expect(JSON.parse(text)).toEqual(structured);
+      expect(text).not.toContain('\n  '); // compact JSON
+
+      const described = await client.callTool({ name: 'describe_schema', arguments: { path: 'fr.documents.search' } });
+      expect(described.structuredContent).toMatchObject({ found: true, entries: [{ id: 'fr.documents.search' }] });
+      const missing = await client.callTool({ name: 'describe_schema', arguments: { path: 'fr.no.such.thing' } });
+      expect(missing.isError).toBeFalsy();
+      expect(missing.structuredContent).toMatchObject({ found: false });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('advertises an outputSchema for every tool', async () => {
+    const client = await connect({ mode: 'auto' });
+    try {
+      const { tools } = await client.listTools();
+      for (const tool of tools) expect(tool.outputSchema, tool.name).toMatchObject({ type: 'object' });
+      expect(tools.find(t => t.name === 'execute')!.outputSchema).toMatchObject({ required: ['ok', 'logs', 'durationMs'] });
+      expect(tools.find(t => t.name === 'search_api')!.outputSchema).toMatchObject({ required: ['hits', 'note'] });
+      expect(tools.find(t => t.name === 'describe_schema')!.outputSchema).toMatchObject({ required: ['found'] });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('returns a failed execution as isError with the full envelope, even without a sandbox', async () => {
+    const client = await connect({ mode: 'auto' });
+    try {
+      await client.listTools(); // lets the client check structuredContent against the outputSchema
+      // eval is rejected by the AST preflight, before any runner is involved.
+      const failed = await client.callTool({ name: 'execute', arguments: { code: 'return eval("1")' } });
+      expect(failed.isError).toBe(true);
+      expect(failed.structuredContent).toMatchObject({ ok: false, logs: [], error: { name: 'PolicyError' } });
+      const text = (failed.content as Array<{ text?: string }>)[0]?.text ?? '';
+      expect(JSON.parse(text)).toEqual(failed.structuredContent);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('returns structuredContent for a successful execute and for a thrown error', async ({ skip }) => {
+    if (!(await sandbox.available())) return skip();
+    const client = await connect({ mode: 'auto' });
+    try {
+      await client.listTools();
+      const ok = await client.callTool({ name: 'execute', arguments: { code: 'return { a: 1 }' } });
+      expect(ok.isError).toBeFalsy();
+      expect(ok.structuredContent).toMatchObject({ ok: true, value: { a: 1 } });
+      const failed = await client.callTool({ name: 'execute', arguments: { code: 'console.log("before"); throw new Error("boom")' } });
+      expect(failed.isError).toBe(true);
+      expect(failed.structuredContent).toMatchObject({ ok: false, logs: ['before'], error: { name: 'Error', message: 'boom' } });
     } finally {
       await client.close();
     }

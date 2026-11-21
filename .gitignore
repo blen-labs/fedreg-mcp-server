@@ -18,3 +18,7 @@ release-notes.generated.md
 
 # Local verification fixtures and browser captures
 .local/
+
+# Playwright
+test-results/
+playwright-report/

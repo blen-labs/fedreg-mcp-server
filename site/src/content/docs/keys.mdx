@@ -1,0 +1,55 @@
+---
+title: Get your keys
+description: Which sources need a key, how to get the free regulations.gov key, and its rate limit.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Only one of the three sources needs a key. The key is free, and it is yours alone, so do not share
+it.
+
+| Source | What it unlocks | Key | Setting |
+| --- | --- | --- | --- |
+| Federal Register (`fr`) | Rules, proposed rules, notices, presidential documents, public inspection | None | None |
+| eCFR (`ecfr`) | The Code of Federal Regulations, its structure and history | None | None |
+| regulations.gov (`regs`) | Dockets, documents, and public comments | A free api.data.gov key, from [open.gsa.gov](https://open.gsa.gov/api/regulationsgov/) | `FEDREG_REGS_API_KEY` |
+
+- Without the regulations.gov key, `regs` is off. Its calls return `SourceUnavailable` with
+  instructions, and `fr` and `ecfr` still work.
+- On the hosted server you save the key on your account page instead of setting it. See
+  [Connect your assistant](/connect/#chatgpt-and-other-remote-clients).
+
+## Get the regulations.gov key
+
+<Steps>
+
+1. Open [open.gsa.gov/api/regulationsgov](https://open.gsa.gov/api/regulationsgov/) and find the
+   **Getting Started** section.
+2. Fill in the sign-up form with your name and email address.
+3. Copy the key that api.data.gov gives you. It is a 40-character string.
+
+</Steps>
+
+The key is an api.data.gov key. It identifies you, and it works for the other APIs on api.data.gov
+too.
+
+## Know the rate limit
+
+- **1,000 requests an hour.** api.data.gov applies this default to each key, across all of its
+  APIs. A key that passes the limit is blocked for up to an hour, and the API answers `429`.
+- **The server paces each key.** A self-hosted server's shared key gets a token bucket: 1,000
+  calls to start with, refilled at 1,000 an hour (about one every 3.6 seconds), so a busy hour can
+  briefly go past 1,000 and api.data.gov may then answer `429`. On the hosted server, each
+  account's key has a fixed hourly window of 1,000 calls, kept in its database. Either way a
+  program makes at most 30 regulations.gov calls in one `execute` run.
+- **Need more?** Ask the API owner, as api.data.gov's
+  [rate limit page](https://api.data.gov/docs/rate-limits/) says.
+
+The limit counts requests, so the server's cache helps: a repeated question within 5 minutes is
+answered from memory and spends nothing.
+
+## Where the key goes
+
+You give the key to the server when you [connect your assistant](/connect/). It stays in the
+server process. It never enters the sandbox, and it never appears on the SDK objects that a
+program can see.

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Loading, Notice, Shell, SignedInAs, SignOut } from '@/components/shell';
+import { Notice } from '@/components/kit/notice';
+import { Loading, Shell, SignedInAs, SignOut } from '@/components/kit/shell';
 import { api, type Connection } from '@/lib/api';
 import { useFlow } from '@/lib/flow';
 import { useLoad } from '@/lib/use-load';
@@ -19,6 +20,7 @@ export function Consent() {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   async function decide(accept: boolean) {
+    if (busy) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -59,10 +61,10 @@ export function Consent() {
         </Notice>
       )}
       <div className="flex flex-wrap gap-3">
-        <Button disabled={busy} onClick={() => decide(true)}>
+        <Button aria-disabled={busy} onClick={() => void decide(true)}>
           Allow
         </Button>
-        <Button variant="outline" disabled={busy} onClick={() => decide(false)}>
+        <Button variant="outline" aria-disabled={busy} onClick={() => void decide(false)}>
           Cancel
         </Button>
       </div>

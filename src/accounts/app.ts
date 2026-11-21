@@ -11,8 +11,9 @@ import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
 import { log } from '../util/logger.js';
 import { IpRateLimiter, clientIp } from '../server/ipRateLimiter.js';
-import { originAllowed } from '../server/http.js';
+import { originAllowed, MAX_REQUEST_BODY_BYTES } from '../server/http.js';
 import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
+import { DOCS_PATH, docsHandler } from './docs.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -42,6 +43,28 @@ function registeredRedirects(body: Buffer): unknown {
     return [];
   }
 }
+/** Client-side routes of the portal (web/src/main.tsx), served as index.html. */
+const PORTAL_ROUTES = ['/', '/sign-in', '/connect', '/consent', '/account', '/error'];
+/** Portal routes with their own prerendered page in dist/web (web/vite.config.ts). */
+const PRERENDERED_ROUTES: Record<string, string> = { '/privacy-policy': 'privacy-policy.html', '/terms': 'terms.html' };
+const PORTAL_CSP =
+  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
+/** A top-level page load in a browser (not fetch, not an API client). */
+function isNavigation(req: express.Request): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  const mode = req.get('sec-fetch-mode');
+  if (mode) return mode === 'navigate';
+  return req.accepts(['json', 'html']) === 'html';
+}
+
+const TOO_MANY_PAGE = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Too many requests · Federal Regulations MCP</title></head>
+<body><main><h1>Too many requests</h1><p>This address sent too many requests. Wait a minute, then <a href="/">try again</a>.</p></main></body>
+</html>
+`;
+
 /** MCP's rule for redirect URIs: HTTPS, or plain HTTP only to this computer. */
 export function allowedRedirect(value: unknown) {
   if (typeof value !== 'string') return false;
@@ -52,6 +75,16 @@ export function allowedRedirect(value: unknown) {
     return false;
   }
 }
+
+/** The columns of a Better Auth `oauthAccessToken` row that bearer checks read. */
+type AccessTokenRow = {
+  userId?: string | null;
+  clientId: string;
+  revoked?: boolean | Date | null;
+  expiresAt: Date | string;
+  resources?: string[] | null;
+  scopes?: string[] | string | null;
+};
 
 export async function createAccountApp(
   config: AccountConfig,
@@ -99,14 +132,14 @@ export async function createAccountApp(
   };
   const mcp = createMcpHandler(
     ctx => buildMcpServer(deps, { subject: ctx.authInfo?.extra?.userId as string | undefined }),
-    { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.mcp_handler_error') },
+    { legacy: 'stateless', maxSubscriptions: 0, maxRequestBodySize: MAX_REQUEST_BODY_BYTES, onerror: () => log.warn('account.mcp_handler_error') },
   );
   // Anonymous endpoint: the same tools, no token read or required. Each client address is its
   // own subject, so the per-subject execution cap stops one anonymous client from taking every
   // execution slot from everyone else.
   const publicMcp = createMcpHandler(
     ctx => buildMcpServer(publicDeps, { subject: ctx.authInfo?.extra?.anonymousSubject as string | undefined }),
-    { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.public_mcp_handler_error') },
+    { legacy: 'stateless', maxSubscriptions: 0, maxRequestBodySize: MAX_REQUEST_BODY_BYTES, onerror: () => log.warn('account.public_mcp_handler_error') },
   );
   const resource = `${config.origin}${ACCOUNT_MCP_PATH}`;
   const foreignOrigin = (req: express.Request) =>
@@ -161,17 +194,44 @@ export async function createAccountApp(
   });
   const webRoot = fileURLToPath(new URL('../../dist/web/', import.meta.url));
   app.use('/assets', express.static(resolve(webRoot, 'assets'), { immutable: true, maxAge: '1y', index: false }));
-  // Production reads the built page once; development rereads it so `pnpm dev:web` rebuilds show.
-  const loadIndex = () => readFile(resolve(webRoot, 'index.html'), 'utf8').catch(() => undefined);
-  let indexHtml: string | undefined;
-  app.get(['/', '/sign-in', '/connect', '/consent', '/account', '/privacy-policy', '/terms'], async (_req, res) => {
-    const html = config.production ? (indexHtml ??= await loadIndex()) : await loadIndex();
+  // The documentation site, when the image carries it (deploy/Dockerfile builds site/ into
+  // docs-site/, a sibling of dist/ that the npm package does not ship). Static and public, so it
+  // sits before the per-IP limiter like /assets, with its own CSP (see docs.ts).
+  const docs = docsHandler(config.docsRoot ?? fileURLToPath(new URL('../../docs-site/', import.meta.url)));
+  if (docs) {
+    // `/docs` without the slash would serve the index at the wrong base; send it to `/docs/`.
+    app.use(DOCS_PATH, (req, res, next) => {
+      const [path = '', query] = req.originalUrl.split('?');
+      if (path !== DOCS_PATH) return docs(req, res, next);
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      res.redirect(301, `${DOCS_PATH}/${query === undefined ? '' : `?${query}`}`);
+    });
+  }
+  // Production reads each built page once; development rereads them so `pnpm dev:web` rebuilds show.
+  const pages = new Map<string, string>();
+  const loadPage = (file: string) => readFile(resolve(webRoot, file), 'utf8').catch(() => undefined);
+  const sendPortal = async (res: express.Response, status = 200, file = 'index.html') => {
+    const html = config.production ? (pages.get(file) ?? (await loadPage(file))) : await loadPage(file);
     if (!html) return res.status(503).send('The web interface is not built. Run pnpm build.');
-    res.set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
-      .type('html').send(html);
+    if (config.production) pages.set(file, html);
+    res.status(status).set('Content-Security-Policy', PORTAL_CSP).type('html').send(html);
+  };
+  // The policy pages are prerendered at build time (web/prerender.ts), so their text is in the
+  // HTML for clients that do not run JavaScript: crawlers, link checkers, directory reviewers.
+  app.get(Object.keys(PRERENDERED_ROUTES), async (req, res) => {
+    await sendPortal(res, 200, PRERENDERED_ROUTES[req.path.replace(/(?<=.)\/$/, '')]);
   });
-  const tooMany = (res: express.Response) =>
-    res.status(429).set('Retry-After', '60').send('Too many requests');
+  app.get(PORTAL_ROUTES, async (_req, res) => {
+    await sendPortal(res);
+  });
+  const tooMany = (res: express.Response) => {
+    res.status(429).set('Retry-After', '60');
+    // A person in a browser gets a page; API clients get the short text they always did.
+    if (isNavigation(res.req)) {
+      return res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'").type('html').send(TOO_MANY_PAGE);
+    }
+    return res.send('Too many requests');
+  };
   app.use(async (req, res, next) => {
     // Hosted connectors (ChatGPT, Claude) send every user's OAuth and MCP traffic from a few
     // shared egress IPs, so those endpoints are limited elsewhere: Better Auth limits each OAuth
@@ -184,32 +244,32 @@ export async function createAccountApp(
     next();
   });
   const mcpNode = toNodeHandler(mcp, {
+    maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     onerror: () => log.warn('account.mcp_http_error'),
   });
   const publicNode = toNodeHandler(publicMcp, {
+    maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     onerror: () => log.warn('account.public_mcp_http_error'),
   });
   // In memory per replica, like the base transport's limiter it mirrors.
   const publicLimiter = new IpRateLimiter(config.ipRps ?? 5, config.ipBurst ?? 20);
-  // MCP's Origin rule for the anonymous endpoint, which runs code with no token to check: another
-  // site's page must not drive it. Non-browser clients send no Origin and pass. The signed-in
-  // endpoint accepts any Origin: hosted connectors (claude.ai, chatgpt.com) send theirs, every
-  // request carries a bearer token (never a cookie), and the Host check blocks DNS rebinding.
-  const mcpOriginOk = (req: express.Request) => {
-    const origin = req.headers.origin;
-    return typeof origin !== 'string' || originAllowed(origin, config.origin, config.allowedOrigins ?? []);
-  };
   // Federal Register and eCFR need no sign-in. A bearer token sent here is ignored: signed-in
   // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
     if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
-    if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
+    // MCP's Origin rule: with no token to check, another site's page must not drive this endpoint
+    // (it runs code). Non-browser clients send no Origin and pass. The signed-in endpoint accepts
+    // any Origin: hosted connectors (claude.ai, chatgpt.com) send theirs, every request carries a
+    // bearer token (never a cookie), and the Host check above already blocks DNS rebinding.
+    const origin = req.headers.origin;
+    if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? []))
+      return res.status(403).json({ error: 'origin_not_allowed' });
     // toNodeHandler forwards req.auth to the factory; no token is involved.
     Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${ipOf(req) ?? 'unknown'}` } } });
     await publicNode(req, res);
   });
-  // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
-  // must work in both modes. The SDK reads the body only after the token checks below pass.
+  // No body parser: the SDK reads the body itself (capped by maxRequestBodySize, as in the base
+  // HTTP transport) and only after the token checks below pass.
   app.all(ACCOUNT_MCP_PATH, async (req, res) => {
     const challenge = (status: number, error: string) =>
       res
@@ -228,7 +288,7 @@ export async function createAccountApp(
     // Opaque tokens are checked against their hashed database row on every request, so
     // revocation, client disabling, user deletion and loss of email verification apply immediately.
     const context = await auth.$context;
-    const token = await context.adapter.findOne<any>({
+    const token = await context.adapter.findOne<AccessTokenRow>({
       model: 'oauthAccessToken',
       where: [{ field: 'token', value: digest(value) }],
     });
@@ -240,11 +300,11 @@ export async function createAccountApp(
     )
       return challenge(401, 'invalid_token');
     const [client, user] = await Promise.all([
-      context.adapter.findOne<any>({
+      context.adapter.findOne<{ disabled?: boolean | null }>({
         model: 'oauthClient',
         where: [{ field: 'clientId', value: token.clientId }],
       }),
-      context.adapter.findOne<any>({
+      context.adapter.findOne<{ id: string; emailVerified?: boolean | null }>({
         model: 'user',
         where: [{ field: 'id', value: token.userId }],
       }),
@@ -370,7 +430,12 @@ export async function createAccountApp(
     },
   );
   installPortal(app, config, store, auth, fetcher, ipOf);
-  app.use((_req, res) => res.status(404).send('Not found'));
+  // Unknown paths: a person in a browser gets the portal's own not-found page (status 404);
+  // API clients get the short text they always did.
+  app.use(async (req, res) => {
+    if (isNavigation(req)) return sendPortal(res, 404);
+    res.status(404).send('Not found');
+  });
   app.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       if (

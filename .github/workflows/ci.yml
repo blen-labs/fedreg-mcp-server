@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The release workflow runs these exact gates on the commit it publishes.
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -13,7 +18,53 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['20', '22']
+        node: ['24', '26']
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: fedreg-ci
+          POSTGRES_DB: fedreg_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:fedreg-ci@localhost:5432/fedreg_test
+      # Sandbox and database tests may not skip in CI (test/required-runners.spec.ts).
+      FEDREG_REQUIRE_RUNNERS: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # pnpm version is read from the "packageManager" field in package.json.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.9.8
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level moderate
+      # The documentation site (site/) has its own lockfile; the Docker job builds it.
+      - run: pnpm audit --audit-level moderate
+        working-directory: site
+      - run: pnpm typecheck
+      - run: pnpm lint
+      # Build before testing: the account frontend test serves the built dist/web bundle.
+      - run: pnpm build
+      - run: pnpm test
+
+  accessibility:
+    # The portal and the documentation site in a real browser: axe-core (WCAG 2.0-2.2 A/AA) on
+    # every page and state, light and dark, 1280 and 320 px, plus landmark, focus and announcement
+    # checks (web/e2e). Manual checks are in docs/accessibility.md.
+    name: accessibility (portal + docs)
+    runs-on: ubuntu-latest
+    # The signed-in journey (web/e2e/journey.spec.ts) runs the real account server.
     services:
       postgres:
         image: postgres:17-alpine
@@ -27,41 +78,98 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://postgres:fedreg-ci@localhost:5432/fedreg_test
     steps:
-      - uses: actions/checkout@v7
-
-      # pnpm version is read from the "packageManager" field in package.json.
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: ${{ matrix.node }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: 'pnpm'
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: site
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.9.8
+      # The browser version is pinned by @playwright/test in the lockfile.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:web
+
+  package:
+    name: npm package + MCPB bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
-
-      # isolated-vm needs python + a C++ toolchain to compile.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
-
-      # Deno so the fallback sandbox runner is actually exercised (its tests
-      # gate on availability and report a skip without a runner).
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm typecheck
-      - run: pnpm lint
-      # Build before testing: the account frontend test serves the built dist/web bundle.
       - run: pnpm build
-      - run: pnpm test
+      - name: npm package contents
+        run: |
+          npm pack --dry-run --json --ignore-scripts > pack.json
+          node -e "const f=JSON.parse(require('fs').readFileSync('pack.json'))[0].files.map(x=>x.path);for(const p of ['LICENSE','NOTICE','dist/bin.js','dist/web/THIRD_PARTY_NOTICES.txt','schema/fr.json','schema/ecfr.json','schema/regs.json'])if(!f.includes(p)){console.error('missing '+p);process.exit(1)};if(f.some(p=>/^(\.env|\.local|test|mcpb-build)/.test(p))){console.error('unexpected files');process.exit(1)}"
+      - run: pnpm mcpb:prepare && pnpm mcpb:pack
+      # Run the bundle as a desktop host does: plain node, minimal env, no Deno, no repo node_modules.
+      - name: MCPB smoke (execute in a clean directory)
+        run: |
+          mkdir -p /tmp/mcpb && cd /tmp/mcpb && unzip -q "$GITHUB_WORKSPACE/fedreg-mcp-server.mcpb"
+          test -f LICENSE && test -f NOTICE
+          node "$GITHUB_WORKSPACE/scripts/mcpb-smoke.mjs" /tmp/mcpb
+      # The manifest also admits Node 24 (engines floor): run the same bundle there.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: MCPB smoke on Node 24
+        run: node --version && node "$GITHUB_WORKSPACE/scripts/mcpb-smoke.mjs" /tmp/mcpb
+
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./deploy/Dockerfile
+          push: false
+          load: true
+          tags: fedreg-mcp:ci
+      - name: Refuses to serve without authentication
+        run: |
+          if docker run --rm fedreg-mcp:ci; then echo "started without auth"; exit 1; fi
+      - name: Runs execute in the Deno sandbox
+        run: |
+          docker run -d --name smoke -p 127.0.0.1:8080:8080 -e FEDREG_ALLOWED_HOSTS=127.0.0.1:8080 fedreg-mcp:ci node dist/bin.js --http --insecure --host 0.0.0.0 --sandbox deno
+          for _ in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/health | grep -q '"sandbox":"deno"'
+          # A 2026-07-28 request: protocol version, routing headers and the _meta envelope.
+          curl -fsS -X POST http://127.0.0.1:8080/mcp -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+            -H 'mcp-protocol-version: 2026-07-28' -H 'mcp-method: tools/call' -H 'mcp-name: execute' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"execute","arguments":{"code":"return 1 + 41"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"ci","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}' \
+            | grep -q '"structuredContent":{[^}]*"value":42'
+          docker rm -f smoke
 
   conventional-commits:
     name: conventional commits
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       # The release pipeline computes versions and the CHANGELOG from
       # conventional commit subjects, so non-conforming subjects are a build
       # error, not a style nit. Merge commits are exempt (the release script
@@ -77,8 +185,11 @@ jobs:
             RANGE="$BASE..$HEAD_SHA"
           elif git rev-parse -q --verify "$BEFORE^{commit}" >/dev/null 2>&1; then
             RANGE="$BEFORE..$HEAD_SHA"
+          elif TAG=$(git describe --tags --abbrev=0 2>/dev/null); then
+            RANGE="$TAG..$HEAD_SHA"
           else
-            RANGE="$(git describe --tags --abbrev=0)..$HEAD_SHA"
+            # First push of a repository with no tags: check its whole history.
+            RANGE="$HEAD_SHA"
           fi
           echo "checking $RANGE"
           git log --no-merges --format='%s' "$RANGE" \
@@ -90,17 +201,3 @@ jobs:
             exit 1
           fi
           echo "all commit subjects conform"
-
-  docker:
-    name: docker build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - name: Build image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./deploy/Dockerfile
-          push: false
-          tags: fedreg-mcp:ci

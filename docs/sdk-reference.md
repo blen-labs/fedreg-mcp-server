@@ -5,9 +5,12 @@ FederalRegister.gov v1, `ecfr` for the Electronic Code of Federal Regulations,
 and `regs` for regulations.gov v4. All return plain JSON; every method is
 `async` and resolves with the upstream payload.
 
-> `regs` is always defined, but without `FEDREG_REGS_API_KEY` the source is
+> `regs` is always defined, but without a regulations.gov key the source is
 > disabled and `regs.*` calls throw a `SourceUnavailable` error; `fr` and
-> `ecfr` are unaffected.
+> `ecfr` are unaffected. Which key a call uses depends on where it runs: stdio,
+> self-hosted HTTP and the anonymous `/mcp` endpoint use the operator's
+> `FEDREG_REGS_API_KEY`; a signed-in `/mcp/account` connection uses only the key
+> saved in that person's account.
 >
 > Only the methods listed below are callable: the host resolves each call
 > against an explicit per-source method table, so anything else (including
@@ -166,7 +169,7 @@ The SDK throws (and the proxy re-throws inside the sandbox) named errors:
 - `HeadersTimeoutError` / `BodyTimeoutError` — the upstream call exceeded
   `FEDREG_UPSTREAM_TIMEOUT_MS` (undici's error names are passed through).
 - `SourceUnavailable` — the source is registered but disabled (e.g. `regs.*`
-  without `FEDREG_REGS_API_KEY`).
+  with no regulations.gov key for this connection).
 - `RateLimited` (status 429) — the named government API is rate
   limiting this server, or too many calls were already waiting for it
   (`FEDREG_UPSTREAM_MAX_WAIT_MS`). fr/ecfr 429s are retried once after
@@ -187,9 +190,9 @@ errors), `SandboxUnavailable` (no runner), and a timeout when `timeoutMs` is
 exceeded.
 
 Inside `execute` a thrown error is captured by `execute`'s own
-`{ ok: false, error: { name, message, status? } }` envelope and surfaces to
-the MCP client as a normal tool result (no `isError` field) whose text block
-contains that structured error JSON — inspect `ok`, not `isError`.
+`{ ok: false, error: { name, message, status? } }` envelope. The MCP client
+receives that envelope as `structuredContent` (and as compact JSON text) with
+`isError: true`, so a failed run is visible without parsing the text.
 
 ## Style guidelines for sandboxed code
 

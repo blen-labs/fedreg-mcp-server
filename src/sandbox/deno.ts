@@ -296,7 +296,10 @@ const S = JSON.stringify, P = JSON.parse, Str = String, apply = Reflect.apply, t
 const ownKeys = Reflect.ownKeys, deleteProperty = Reflect.deleteProperty, defineProperty = Object.defineProperty;
 const BlobOf = Blob, urlFor = URL.createObjectURL.bind(URL), forgetUrl = URL.revokeObjectURL.bind(URL);
 // The language's own globals. A program gets these, console and the SDK bindings.
-const LANGUAGE = new Set(['globalThis', 'Infinity', 'NaN', 'undefined', 'eval', 'isFinite', 'isNaN', 'parseFloat', 'parseInt',
+// queueMicrotask schedules only a microtask (no I/O, timers or host access), and Deno 2.9's worker
+// message plumbing calls it on the worker's global: deleting it breaks a program with three or more
+// SDK calls pending at once ("enqueue is not a function").
+const LANGUAGE = new Set(['queueMicrotask', 'globalThis', 'Infinity', 'NaN', 'undefined', 'eval', 'isFinite', 'isNaN', 'parseFloat', 'parseInt',
   'decodeURI', 'decodeURIComponent', 'encodeURI', 'encodeURIComponent', 'escape', 'unescape',
   'AggregateError', 'Array', 'ArrayBuffer', 'AsyncDisposableStack', 'BigInt', 'BigInt64Array', 'BigUint64Array', 'Boolean',
   'DataView', 'Date', 'DisposableStack', 'Error', 'EvalError', 'FinalizationRegistry', 'Float16Array', 'Float32Array',

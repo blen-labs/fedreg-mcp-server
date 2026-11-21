@@ -20,7 +20,7 @@ labels: bug
 
 ## Environment
 
-- Server version: <!-- pnpm view @blen/fedreg-mcp-server version, or git SHA -->
+- Server version: <!-- the version your MCP client shows for fedreg-mcp-server, or git SHA; npm view shows the newest release, not the one you run -->
 - Transport: <!-- stdio | http -->
 - Sandbox runner: <!-- isolate | deno | unavailable -->
 - Node: <!-- node -v -->
@@ -29,9 +29,10 @@ labels: bug
 
 ## Logs
 
-<!-- Paste relevant log lines. Set FEDREG_LOG_LEVEL=debug for more detail. -->
+<!-- Paste relevant log lines. Set FEDREG_LOG_LEVEL=debug for more detail.
+     Remove API keys first. -->
 
 ```
 ```
 
-> **Security issue?** Please use a GitHub Security Advisory instead — see [SECURITY.md](../../SECURITY.md).
+> **Security issue?** Please use a GitHub Security Advisory instead — see [SECURITY.md](https://github.com/blen-labs/fedreg-mcp-server/blob/main/SECURITY.md).

@@ -20,6 +20,8 @@ export function createAuth(config: AccountConfig, store: Store) {
     database: store.pool,
     trustedOrigins: [config.origin],
     logger: { disabled: true },
+    // Sign-in and OAuth errors go to the portal's own page instead of Better Auth's unstyled one.
+    onAPIError: { errorURL: '/error' },
     advanced: { useSecureCookies: config.production },
     // Better Auth enables its limiter only when NODE_ENV is exactly 'production', but an unset
     // NODE_ENV is production here. The app exempts OAuth registration and token endpoints from
@@ -84,6 +86,7 @@ export type Auth = ReturnType<typeof createAuth>;
 
 export async function initializeAuth(auth: Auth, config: AccountConfig, store: Store) {
   const lock = await store.pool.connect();
+  let failure: unknown;
   try {
     await lock.query("SELECT pg_advisory_lock(hashtext('fedreg-auth-migration'))");
     const migration = await getMigrations(auth.options);
@@ -96,9 +99,17 @@ export async function initializeAuth(auth: Auth, config: AccountConfig, store: S
         disabled: false, policyVersion: 1, createdAt: new Date(), updatedAt: new Date(),
       } });
     }
-  } finally {
-    try { await lock.query("SELECT pg_advisory_unlock(hashtext('fedreg-auth-migration'))"); }
-    catch { lock.release(true); throw new Error('Auth migration lock connection failed'); }
-    lock.release();
+  } catch (err) {
+    failure = err;
   }
+  // Unlock after the work either way. A connection that cannot unlock is discarded, and the
+  // migration's own error (if any) is what the caller sees.
+  try {
+    await lock.query("SELECT pg_advisory_unlock(hashtext('fedreg-auth-migration'))");
+  } catch {
+    lock.release(true);
+    throw failure ?? new Error('Auth migration lock connection failed');
+  }
+  lock.release();
+  if (failure !== undefined) throw failure;
 }

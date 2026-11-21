@@ -1,19 +1,34 @@
 name: release
 
-# Continuous release: EVERY push to main is released. The workflow runs the
-# full gates, computes the next SemVer from the conventional commits since
-# the last tag (breaking -> major, feat -> minor, everything else -> at
-# least a patch; scripts/release.mjs + scripts/release-lib.mjs), stamps
-# package.json and the x-release-version source markers, prepends the
-# CHANGELOG section, pushes a chore(release) commit with the vX.Y.Z tag,
-# creates the GitHub Release, and publishes to npm via trusted publishing
-# (OIDC) - no npm token exists anywhere.
+# Continuous release: every push to main that can change what users install is released, after
+# the complete CI gates pass on that exact commit. scripts/release.mjs first decides whether the
+# commits since the last tag need a release: a range of only build/chore/ci/docs/style/test
+# commits that touch no shipped path (src/, web/, schema/, ...), no shipped package.json field and
+# no production dependency in the lockfile (the MCPB bundle installs it) reports released=false,
+# and nothing is tagged or published; those commits ship with the next release (or now, via a
+# `force` dispatch). Otherwise it computes the next SemVer (breaking ->
+# major, feat -> minor, anything else -> patch; the first release of a repository with no tags
+# publishes the version package.json declares), stamps package.json and the x-release-version
+# markers, and writes the CHANGELOG section.
 #
-# No-loop guarantee: the release commit is pushed with GITHUB_TOKEN, and
-# GitHub never triggers workflows for GITHUB_TOKEN-initiated events.
-# Concurrent-merge safety: if another commit lands on main mid-run, the
-# release push is rejected and this run fails; the newer push's run then
-# releases both changes together.
+# Least privilege, three jobs:
+#   gates   - read-only: the full CI workflow (tests incl. Postgres + both sandboxes, Docker, MCPB).
+#   cut     - contents: write. Installs with --ignore-scripts, stamps, builds, packs the tarball
+#             and the Claude Desktop bundle, pushes the chore(release) commit + tag, creates the
+#             GitHub Release with both attached.
+#   publish - id-token: write only. Never checks out or installs dependencies: it publishes the
+#             exact tarball `cut` built, via npm trusted publishing (OIDC), with provenance. No npm
+#             token exists; only this workflow, in the main-only `npm` environment, can publish.
+#
+# The release commit is pushed as the org's release GitHub App (the ruleset's only bypass actor),
+# because main's ruleset requires PRs and GITHUB_TOKEN cannot be a bypass actor. The app's key
+# lives in the `release` environment (deployable from main only); the job mints a short-lived
+# token scoped to this repository with contents:write just before the push and uses it only there.
+# No-loop guarantee: app-token pushes DO trigger workflows, so the release commit's own run
+# skips `gates` (and therefore everything else) by its `chore(release):` subject, and
+# scripts/release.mjs ignores chore(release) commits (released=false; test/release.spec.ts).
+# If another commit lands on main mid-run, the release push is rejected and this run fails;
+# the newer push's run releases both.
 on:
   push:
     branches: [main]
@@ -21,6 +36,10 @@ on:
     inputs:
       republish:
         description: 'Recovery only: re-run gates and publish the CURRENT version to npm (no bump, no tag)'
+        type: boolean
+        default: false
+      force:
+        description: 'Release the commits since the last tag even if none would on its own (e.g. a dev-tooling bump that changes the build output)'
         type: boolean
         default: false
 
@@ -32,71 +51,116 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    # Belt-and-braces: skip release commits should one ever arrive via a PAT.
+  gates:
     if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message, 'chore(release):')
+    uses: ./.github/workflows/ci.yml
+
+  cut:
+    needs: gates
     runs-on: ubuntu-latest
+    environment: release # holds the release app's key; deployments restricted to main
     permissions:
-      contents: write # release commit, tag, GitHub Release
-      id-token: write # npm trusted publishing (OIDC) + provenance
+      contents: write # GitHub Release (the commit and tag are pushed as the release app)
+    outputs:
+      released: ${{ steps.cut.outputs.released || (inputs.republish && 'true') || 'false' }}
+      version: ${{ steps.cut.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # full history + tags: the bump is computed from commits since the last tag
-          # Explicit: the release step below pushes the chore(release) commit
-          # with these credentials; newer checkout majors changed the
-          # persistence default, so never rely on it.
-          persist-credentials: true
-      - uses: pnpm/action-setup@v6
-      # No registry-url here on purpose: setup-node's generated .npmrc would
-      # reference a NODE_AUTH_TOKEN env var that does not exist - publishing
-      # authenticates via npm Trusted Publishing (OIDC), configured on the
-      # npm package settings for this repo + release.yml.
-      - uses: actions/setup-node@v7
+          persist-credentials: false # nothing below pushes with GITHUB_TOKEN; see the final step
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      # isolated-vm needs python + a C++ toolchain to compile
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 build-essential
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
+          node-version: '26'
+      # No dependency lifecycle scripts run in a job that can push to the repository.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Compute version, stamp files, write CHANGELOG section
         id: cut
         if: ${{ !inputs.republish }}
+        env:
+          RELEASE_FORCE: ${{ inputs.force && '1' || '' }}
         run: node scripts/release.mjs
       # Build AFTER stamping so dist/ carries the released version strings.
       - run: pnpm build
-      # Prove the artifact exists before tagging or publishing.
-      - run: test -f dist/bin.js && test -f dist/index.js && test -f dist/index.d.ts
+      - name: Pack the exact artifact to publish
+        run: |
+          npm pack --ignore-scripts
+          node -e "const v=require('./package.json').version; if(!require('fs').existsSync('blen-fedreg-mcp-server-'+v+'.tgz')) process.exit(1)"
+          # Every x-release-version line in the build carries the new version, and the build has
+          # as many of those lines as the sources (tsc keeps the marker comments).
+          v=$(node -p 'require("./package.json").version')
+          built=$(grep -rh --include='*.js' 'x-release-version' dist || true)
+          sources=$(grep -rh 'x-release-version' src | grep -c . || true)
+          [ "$sources" -gt 0 ] || { echo "::error::no x-release-version line in src/"; exit 1; }
+          [ "$(printf '%s' "$built" | grep -c . || true)" -eq "$sources" ] \
+            || { echo "::error::dist/ has a different number of x-release-version lines than src/"; exit 1; }
+          stale=$(printf '%s\n' "$built" | grep -vF "'$v'" || true)
+          [ -z "$stale" ] || { echo "::error::stamped lines without $v: $stale"; exit 1; }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-tarball
+          path: blen-fedreg-mcp-server-*.tgz
+          if-no-files-found: error
+      # From the same stamped build as the tarball, so the bundle carries the released version.
+      # mcpb:prepare installs the bundle's production dependencies with --ignore-scripts.
+      - name: Build the Claude Desktop bundle
+        if: steps.cut.outputs.released == 'true'
+        run: pnpm mcpb:prepare && pnpm mcpb:pack && test -s fedreg-mcp-server.mcpb
+      - name: Mint a short-lived token for the release push
+        id: app-token
+        if: steps.cut.outputs.released == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
       - name: Commit, tag, and create the GitHub Release
         if: steps.cut.outputs.released == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
           VERSION: ${{ steps.cut.outputs.version }}
           NOTES_FILE: ${{ steps.cut.outputs.notes_file }}
+          BUMP: ${{ steps.cut.outputs.bump }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json CHANGELOG.md src/server/mcpServer.ts src/sdk/bindings.ts
-          git commit -m "chore(release): v${VERSION}"
+          if [ "$BUMP" != "initial" ]; then
+            git add package.json CHANGELOG.md src/server/mcpServer.ts src/sdk/bindings.ts
+            git commit -m "chore(release): v${VERSION}"
+          fi
           git tag -a "v${VERSION}" -m "v${VERSION}"
-          git push origin HEAD:main --follow-tags
-          gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "${NOTES_FILE}"
-      - name: Publish to npm (trusted publishing)
-        if: steps.cut.outputs.released == 'true' || inputs.republish
-        # npm CLI >= 11.5.1 is the reference OIDC trusted-publishing client.
-        # Node 22 bundles npm 10 (no OIDC -> ENEEDAUTH), and pnpm's own OIDC
-        # path has known regressions (pnpm/pnpm#11513), so upgrade npm and
-        # publish with it. prepack (pnpm run build) still runs under npm.
-        # The version is PINNED: this job holds OIDC publish rights, and an
-        # unpinned npm@latest would let a compromised npm release run with
-        # publishing power. Bump deliberately.
+          # Push as the release app (the ruleset's only bypass actor). The token is passed as a
+          # one-off header, never stored in .git/config, and repository hooks are disabled.
+          auth=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          echo "::add-mask::${auth}" # the base64 form is not covered by the token's own mask
+          # --atomic: the tag and main land together or not at all. Without it, a run that lost
+          # the race to a newer push left its tag behind on a commit that never reached main,
+          # and every later run then failed with "tag already exists".
+          git -c core.hooksPath=/dev/null -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${auth}" \
+            push --atomic "https://github.com/${REPO}.git" HEAD:main "refs/tags/v${VERSION}"
+          gh release create "v${VERSION}" --title "v${VERSION}" --notes-file "${NOTES_FILE}" blen-fedreg-mcp-server-*.tgz fedreg-mcp-server.mcpb
+
+  publish:
+    needs: cut
+    if: needs.cut.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    environment: npm # deployments restricted to main; the npm trusted publisher names this environment
+    permissions:
+      id-token: write # npm trusted publishing (OIDC) + provenance
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-tarball
+      # Trusted publishing needs npm CLI >= 11.5.1. PINNED: this job holds publish rights, and an
+      # unpinned npm@latest would run with them. Bump deliberately.
+      - name: Publish to npm (trusted publishing, with provenance)
         run: |
           npm install -g npm@12.0.2
-          npm publish --access public
+          npm publish ./blen-fedreg-mcp-server-*.tgz --access public --provenance

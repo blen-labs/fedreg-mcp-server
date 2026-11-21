@@ -49,7 +49,12 @@ export function installPortal(
     return typeof value === 'string' && value.length < 16384 &&
       await verifyOAuthQueryParams(value, config.authSecret) ? value : undefined;
   }
-  const error = (res: Response, status: number, message: string) => res.status(status).json({ error: message });
+  /**
+   * An error the portal shows. `field: 'apiKey'` marks a problem with the key the user typed, which
+   * the page ties to the key field; anything else is a page-level notice.
+   */
+  const error = (res: Response, status: number, message: string, field?: 'apiKey') =>
+    res.status(status).json(field ? { error: message, field } : { error: message });
   async function account(user: { id: string; email: string }) {
     const key = await store.keyStatus(personalOwner(user.id));
     return { email: user.email, personal: { connected: key.connected }, key, mcpUrl: `${config.origin}${ACCOUNT_MCP_PATH}` };
@@ -104,9 +109,9 @@ export function installPortal(
     }
     if (req.body.apiKey) {
       const owner = personalOwner(logged.user.id);
-      if (!await store.allow(`key:${owner}`, 5, 60)) return error(res, 429, 'Too many key checks. Try again in one minute.');
+      if (!await store.allow(`key:${owner}`, 5, 60)) return error(res, 429, 'Too many key checks. Try again in one minute.', 'apiKey');
       const problem = await checkKey(req.body.apiKey, fetcher);
-      if (problem) return error(res, 400, problem);
+      if (problem) return error(res, 400, problem, 'apiKey');
       await store.saveKey(owner, req.body.apiKey, logged.user.id);
     }
     await store.markConnectionReady(logged.session.id, logged.user.id);
@@ -128,9 +133,9 @@ export function installPortal(
     if (!logged) return error(res, 401, 'Sign in to continue.');
     if (Object.keys(req.body ?? {}).some(key => key !== 'apiKey')) return error(res, 400, 'Only apiKey is accepted.');
     const owner = personalOwner(logged.user.id);
-    if (!await store.allow(`key:${owner}`, 5, 60)) return error(res, 429, 'Too many key checks. Try again in one minute.');
+    if (!await store.allow(`key:${owner}`, 5, 60)) return error(res, 429, 'Too many key checks. Try again in one minute.', 'apiKey');
     const problem = await checkKey(req.body?.apiKey, fetcher);
-    if (problem) return error(res, 400, problem);
+    if (problem) return error(res, 400, problem, 'apiKey');
     await store.saveKey(owner, req.body.apiKey, logged.user.id);
     res.json({ saved: true });
   });

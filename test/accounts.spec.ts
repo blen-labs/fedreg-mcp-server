@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createServer, type Server } from 'node:http';
+import { createServer, get as httpGet, type Server } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Pool } from 'pg';
 import { testUtils } from 'better-auth/plugins';
 import fetchCookie from 'fetch-cookie';
@@ -37,6 +39,7 @@ it('rejects unsafe origins, missing secrets, and unsafe OAuth redirects', () => 
   const invalid = { FEDREG_PUBLIC_ORIGIN: 'https://example.com', BETTER_AUTH_SECRET: 's'.repeat(32), ENCRYPTION_KEYS_JSON: '{"key":"sensitive-key-material"' };
   try { loadAccountConfig(invalid); throw new Error('Expected invalid JSON to fail'); }
   catch (error) { expect(String(error)).not.toContain('sensitive-key-material'); expect(String(error)).toContain('must be valid JSON'); }
+  // eslint-disable-next-line no-script-url -- asserting that a javascript: redirect is refused
   for (const url of ['http://evil.example/cb', 'javascript:alert(1)', 'https://user:pass@example.com', 'https://example.com/#fragment']) expect(allowedRedirect(url)).toBe(false);
   expect(allowedRedirect('https://claude.ai/api/mcp/auth_callback')).toBe(true);
   expect(allowedRedirect('http://127.0.0.1:1234/cb')).toBe(true);
@@ -94,7 +97,7 @@ class CountingStore extends Store {
 
 const database = process.env.TEST_DATABASE_URL;
 describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
-  let pool: Pool, store: CountingStore, server: Server, config: AccountConfig;
+  let pool: Pool, store: CountingStore, server: Server, config: AccountConfig, docsRoot: string;
   let service: Awaited<ReturnType<typeof createAccountApp>>;
   let helper: ReturnType<ReturnType<typeof testUtils>['init']>['context']['test'];
   let alice: any, bob: any, browser: typeof fetch, other: typeof fetch;
@@ -192,11 +195,14 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     pool = new Pool({ connectionString: database, options: `-c search_path=${schema}` });
     store = new CountingStore(pool, new Keyring('v1', { v1: randomBytes(32) }));
     await store.initialize();
+    // A minimal built docs site: /docs must be wired with its own CSP inside the account app.
+    docsRoot = mkdtempSync(join(tmpdir(), 'fedreg-docs-'));
+    writeFileSync(join(docsRoot, 'index.html'), '<html><script>window.docs=1</script><title>Docs</title></html>');
     server = createServer();
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     config = { origin: `http://127.0.0.1:${(server.address() as any).port}`, production: false,
       databaseUrl: database!, authSecret: randomToken(), googleClientId: 'fixture-google', googleClientSecret: 'fixture-secret', keyring: new Keyring('v1', { v1: randomBytes(32) }),
-      clientIpHeader: 'x-real-ip' };
+      clientIpHeader: 'x-real-ip', docsRoot };
     const deps = await buildSupervisor(cfg);
     expect(await deps.sandbox.available(), 'Deno is required for account integration tests').toBe(true);
     // Upstream regulations.gov calls go through an injected MockAgent, never the global dispatcher.
@@ -213,6 +219,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   afterAll(async () => {
     await mock?.close(); await service?.close();
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+    if (docsRoot) rmSync(docsRoot, { recursive: true, force: true });
     if (pool) { await pool.query(`DROP SCHEMA ${schema} CASCADE`); await pool.end(); }
   });
   it('discovers OAuth, challenges anonymous callers, and offers Google sign-in', async () => {
@@ -229,10 +236,26 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(google.status, await google.clone().text()).toBe(200);
     expect(new URL((await google.json() as any).url).hostname).toBe('accounts.google.com');
   });
+  it('serves the documentation site at /docs with its own CSP, behind the Host check', async () => {
+    const moved = await fetch(`${config.origin}/docs?q=1`, { redirect: 'manual' });
+    expect(moved.status).toBe(301);
+    expect(moved.headers.get('location')).toBe('/docs/?q=1');
+    const page = await fetch(`${config.origin}/docs/`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('<title>Docs</title>');
+    // The docs policy replaces the portal's, and allows the inline script only by its hash.
+    expect(page.headers.get('content-security-policy')).toContain(`'sha256-${createHash('sha256').update('window.docs=1').digest('base64')}'`);
+    expect(page.headers.get('cache-control')).toBe('public, max-age=300');
+    // fetch cannot set Host (a forbidden header), so the rebinding check goes through node:http.
+    const { port } = new URL(config.origin);
+    const status = await new Promise<number | undefined>((resolve, reject) =>
+      httpGet({ host: '127.0.0.1', port, path: '/docs/', headers: { host: 'evil.example' } }, (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject));
+    expect(status).toBe(421);
+  });
   // Needs the Vite bundle: `pnpm build` (CI builds before testing). Skipped, not failed, without it.
   const webBuilt = existsSync(new URL('../dist/web/index.html', import.meta.url));
   it.skipIf(!webBuilt)('serves the SAM.gov-style frontend and policies with same-origin assets (needs pnpm build)', async () => {
-    for (const path of ['/', '/sign-in', '/account', '/connect', '/consent', '/privacy-policy', '/terms']) {
+    for (const path of ['/', '/sign-in', '/account', '/connect', '/consent', '/privacy-policy', '/terms', '/error']) {
       const page = await fetch(`${config.origin}${path}`);
       expect(page.status).toBe(200);
       expect(page.headers.get('content-security-policy')).toContain("script-src 'self'");
@@ -247,6 +270,57 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       }
     }
     expect(await (await fetch(`${config.origin}/api/portal/config`)).json()).toMatchObject({ google: true, email: false });
+    // An unknown path: a browser navigation gets the portal's not-found page with status 404;
+    // an API client keeps the short text answer.
+    // fetch() always sends `sec-fetch-mode: cors`, so send a browser navigation with node:http.
+    const { port } = new URL(config.origin);
+    const missing = await new Promise<{ status?: number; type?: string; body: string }>((resolve, reject) =>
+      httpGet({ host: '127.0.0.1', port, path: '/no-such-page', headers: { host: new URL(config.origin).host, 'sec-fetch-mode': 'navigate', accept: 'text/html' } }, (res) => {
+        let body = '';
+        res.setEncoding('utf8').on('data', (chunk: string) => (body += chunk)).on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], body }));
+      }).on('error', reject));
+    expect(missing.status).toBe(404);
+    expect(missing.type).toContain('text/html');
+    expect(missing.body).toContain('/assets/');
+    const api = await fetch(`${config.origin}/no-such-page`, { headers: { accept: 'application/json' } });
+    expect(api.status).toBe(404);
+    expect(await api.text()).toBe('Not found');
+  });
+  // The policy URLs are registered as the connector's privacy policy, so their text must be in the
+  // HTML itself (web/prerender.ts), not only rendered by the script. node:http: no JavaScript runs.
+  it.skipIf(!webBuilt)('serves the policy pages with their text in the HTML, without running JavaScript (needs pnpm build)', async () => {
+    const { port, host } = new URL(config.origin);
+    const get = (path: string) => new Promise<{ status?: number; csp?: string | string[]; body: string }>((resolve, reject) =>
+      httpGet({ host: '127.0.0.1', port, path, headers: { host } }, (res) => {
+        let body = '';
+        res.setEncoding('utf8').on('data', (chunk: string) => (body += chunk)).on('end', () => resolve({ status: res.statusCode, csp: res.headers['content-security-policy'], body }));
+      }).on('error', reject));
+    const pages = [
+      { path: '/privacy-policy', title: 'Privacy policy', source: 'privacy-policy.md' },
+      { path: '/terms', title: 'Terms of service', source: 'terms.md' },
+    ];
+    const plain = (html: string) => {
+      // Strip tags until none are left: one pass can leave a tag assembled from the pieces around a removed one.
+      let text = html;
+      for (let prev = ''; prev !== text; ) { prev = text; text = text.replace(/<[^>]*>/g, ''); }
+      return text.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
+    };
+    for (const { path, title, source } of pages) {
+      const headings = [...readFileSync(new URL(`../legal/${source}`, import.meta.url), 'utf8').matchAll(/^## (.+)$/gm)].map((m) => m[1]!);
+      expect(headings.length).toBeGreaterThan(3);
+      for (const url of [path, `${path}/`]) {
+        const page = await get(url);
+        expect(page.status, url).toBe(200);
+        expect(page.csp).toContain("script-src 'self'");
+        expect(page.body).toMatch(new RegExp(`<title>${title} · `));
+        expect(page.body).toMatch(new RegExp(`<h1[^>]*>${title}</h1>`));
+        expect(page.body).toContain('<main id="main"');
+        const text = plain(page.body);
+        for (const heading of headings) expect(text, heading).toContain(heading);
+        expect(page.body).toContain('<script type="module"');
+        expect(page.body).not.toMatch(/<script(?![^>]*\bsrc=)/);
+      }
+    }
   });
   it('validates the separate connection step, preserves saved keys on failure, and allows cancellation', async () => {
     const { oauth_query, state } = await beginAuthorization();
@@ -255,12 +329,17 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect((await send(browser, '/api/portal/connect', payload, 'https://evil.example')).status).toBe(403);
     expect((await send(browser, '/api/portal/connect', { ...payload, oauth_query: `${oauth_query}&client_id=attacker` })).status).toBe(400);
     expect((await send(browser, '/api/portal/connect', { ...payload, owner: personalOwner(bob.id) })).status).toBe(400);
+    // Not about a typed key: no field, so the page shows a notice instead of a field error.
+    const expired = await send(browser, '/api/portal/connect', { ...payload, oauth_query: `${oauth_query}&client_id=attacker` });
+    expect(await expired.json()).toEqual({ error: 'Connection authorization failed.' });
     const info = await browser(`${config.origin}/api/portal/connect?oauth_query=${encodeURIComponent(oauth_query)}`);
     expect(await info.json()).toMatchObject({ email: alice.email, client: 'Test assistant', personal: { connected: false } });
     expect((await send(browser, '/api/portal/connect', { ...payload, apiKey: key })).status).toBe(200);
     expect(await store.getKey(personalOwner(alice.id))).toBe(key);
     validationStatus = 403;
-    expect((await send(browser, '/api/portal/connect', { ...payload, apiKey: 'z'.repeat(40) })).status).toBe(400);
+    const rejectedOnConnect = await send(browser, '/api/portal/connect', { ...payload, apiKey: 'z'.repeat(40) });
+    expect(rejectedOnConnect.status).toBe(400);
+    expect((await rejectedOnConnect.json() as any).field).toBe('apiKey');
     validationStatus = 200;
     expect(await store.getKey(personalOwner(alice.id))).toBe(key);
     const denied = await send(browser, '/api/portal/connect', { oauth_query, decision: 'deny' });
@@ -283,7 +362,13 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(JSON.stringify(rows.rows)).not.toContain(key);
     expect(await (await browser(`${config.origin}/api/portal/account`)).text()).not.toContain(key);
     validationStatus = 403;
-    expect((await send(browser, '/api/portal/keys', { apiKey: 'z'.repeat(40) })).status).toBe(400);
+    const rejected = await send(browser, '/api/portal/keys', { apiKey: 'z'.repeat(40) });
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json() as any).field).toBe('apiKey');
+    // A missing key is about the key field too.
+    const missing = await send(browser, '/api/portal/keys', {});
+    expect(missing.status).toBe(400);
+    expect((await missing.json() as any).field).toBe('apiKey');
     validationStatus = 200;
     expect(await store.getKey(personalOwner(alice.id))).toBe(key);
   });
@@ -309,6 +394,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const sameClient = await Promise.all([1, 2, 3].map(() => mcp(undefined, slow, '/mcp', undefined, '203.0.113.40')));
     expect(sameClient.filter(r => r.body.includes('Busy')).length).toBeGreaterThanOrEqual(1);
     expect((await mcp(undefined, 'return 9;', '/mcp', undefined, '203.0.113.41')).body).toContain('9');
+    // The `${...}` is sandbox source (a template literal that runs inside execute), not a typo.
+    // eslint-disable-next-line no-template-curly-in-string
     const regs = await mcp(undefined, 'try { await regs.documents.search(); } catch (e) { return `${e.name}: ${e.message}`; }', '/mcp');
     expect(regs.body).toContain('SourceUnavailable');
     expect(regs.body).toContain(`${config.origin}/mcp/account`);
@@ -335,7 +422,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const denied = await authorize(browser, false);
     expect(denied.code).toBeNull(); expect(denied.callback.searchParams.get('error')).toBe('access_denied');
     const a = await authorize();
-    expect((await exchange(a.client.client_id, { grant_type: 'authorization_code', code: a.code!, code_verifier: randomToken(), redirect_uri: a.client.redirect_uris[0] })).status).toBe(401);
+    expect((await exchange(a.client.client_id, { grant_type: 'authorization_code', code: a.code!, code_verifier: randomToken(), redirect_uri: a.client.redirect_uris[0] })).status).toBe(400); // RFC 6749 §5.2 invalid_grant
   });
   it('routes each token to its owner, redacts upstream echoes, and applies rotation/removal on the next request', async () => {
     const a = await token(), b = await token(other);
@@ -358,6 +445,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     mock.get('https://api.regulations.gov')
       .intercept({ path: '/v4/documents/missing', method: 'GET', headers: { 'x-api-key': key } })
       .reply(404, { errors: [{ detail: key }] });
+    // The `${...}` is sandbox source (a template literal that runs inside execute), not a typo.
+    // eslint-disable-next-line no-template-curly-in-string
     const missing = await mcp(a.access_token, 'try { await regs.documents.get("missing"); } catch (e) { return `${e.name}: ${e.message}`; }');
     expect(missing.body).toContain('HttpError');
     expect(missing.body).toContain('404');
@@ -427,9 +516,17 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   });
   it('serves hosted connectors\' Origin on /mcp/account, and refuses other sites on the anonymous /mcp', async () => {
     const a = await token();
-    for (const origin of ['https://claude.ai', 'https://chatgpt.com'])
-      expect((await mcp(a.access_token, 'return 42;', '/mcp/account', origin)).status, origin).toBe(200);
+    // Hosted connectors send their own Origin; a bearer token (never a cookie) authenticates them.
+    for (const origin of ['https://claude.ai', 'https://chatgpt.com']) {
+      const hosted = await mcp(a.access_token, 'return 42;', '/mcp/account', origin);
+      expect(hosted.status, origin).toBe(200);
+      expect(hosted.body).toContain('42');
+    }
+    // The anonymous endpoint runs code with no token to check: another site's page is refused.
     expect((await mcp(undefined, 'return 42;', '/mcp', 'https://evil.example')).status).toBe(403);
+    // OAuth discovery stays open to every client.
+    const discovery = await fetch(`${config.origin}/.well-known/oauth-protected-resource/mcp/account`, { headers: { origin: 'https://app.example' } });
+    expect(discovery.headers.get('access-control-allow-origin')).toBe('*');
     expect((await mcp(a.access_token, 'return 42;', '/mcp/account', config.origin)).status).toBe(200);
     expect((await mcp(a.access_token)).status).toBe(200);
   });

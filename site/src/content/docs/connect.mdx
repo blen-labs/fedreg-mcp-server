@@ -1,0 +1,95 @@
+---
+title: Connect your assistant
+description: Add the server to Claude Desktop, Claude Code, Cursor, VS Code, or Gemini CLI, and what ChatGPT and other remote clients need.
+---
+
+import { Aside, Code, LinkButton } from '@astrojs/starlight/components';
+import { bundleUrl, claudeCodeCommand, cursorLink, mcpServersJson, vscodeLink } from '../../lib/install';
+
+The server runs on your computer, and your assistant starts it. Before you connect:
+
+- Install [Node.js](https://nodejs.org/) 24.11 or later, or 26.
+- Optional: [get your key](/keys/) for dockets and comments. The Federal Register and the eCFR
+  need none.
+
+## Claude Desktop
+
+<LinkButton href={bundleUrl} icon="download">Download the extension</LinkButton>
+
+Open the downloaded `.mcpb` file, or drag it into the Claude Desktop window. Claude Desktop asks
+for your regulations.gov key during the install. You can leave it empty.
+
+To set it up by hand, open **Settings → Developer → Edit Config**, add the server, and restart
+Claude Desktop:
+
+<Code code={mcpServersJson} lang="json" title="claude_desktop_config.json" />
+
+## Claude Code
+
+Run this command with your key in place of the example value:
+
+<Code code={claudeCodeCommand} lang="bash" />
+
+## Cursor
+
+<LinkButton href={cursorLink}>Add to Cursor</LinkButton>
+
+Cursor opens with the server filled in and the key field empty. Add your key, or leave it empty,
+then install.
+
+To set it up by hand, add the server to `~/.cursor/mcp.json`, or to `.cursor/mcp.json` in one
+project:
+
+<Code code={mcpServersJson} lang="json" title="mcp.json" />
+
+## VS Code
+
+<LinkButton href={vscodeLink}>Add to VS Code</LinkButton>
+
+VS Code shows the server for review, with the key field empty. Add your key, or leave it empty,
+then install.
+
+To set it up by hand, see
+[MCP configuration](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration) in the
+VS Code documentation.
+
+## Gemini CLI
+
+Add the server to `~/.gemini/settings.json`, or to `.gemini/settings.json` in one project:
+
+<Code code={mcpServersJson} lang="json" title="settings.json" />
+
+## ChatGPT and other remote clients
+
+ChatGPT, Claude custom connectors, and Gemini Enterprise connect to a remote server over HTTPS. They
+do not start a server on your computer.
+
+BLEN hosts one at `https://fedreg.mcp.blenlabs.com/mcp/account`. Add that URL as a custom connector
+and sign in with Google when your client asks. Then save your own regulations.gov key on the
+[account page](https://fedreg.mcp.blenlabs.com/account), or continue without one for the Federal
+Register and the eCFR. The key is stored encrypted and used only for your requests. Without
+signing in, `https://fedreg.mcp.blenlabs.com/mcp` runs programs on the Federal Register and the
+eCFR. `regs` calls there work only if the server's operator has set a shared key
+(`FEDREG_REGS_API_KEY`); otherwise they tell you to use the sign-in URL and your own key.
+
+To run your own instance instead, see [Self-host](/self-host/).
+
+## Check that it works
+
+Ask your assistant:
+
+> Which final rules did the EPA publish about methane since 2024?
+
+The assistant calls `search_api` to find the right methods, then `execute` to run them.
+
+| Message | Cause | Fix |
+| --- | --- | --- |
+| `SourceUnavailable` | The regulations.gov key is missing or blank. | Add the key to your client's configuration. See [Get your keys](/keys/). |
+| `HttpError` with status `403` on `regs` | regulations.gov refused the key. | Check the key. |
+| `RateLimited` | A government API is limiting the server, or too many calls were waiting. | Make fewer calls at once, or try again later. |
+| `SandboxUnavailable` | No sandbox runtime is available for `execute`. | Install [Deno](https://docs.deno.com/runtime/getting_started/installation/). |
+
+<Aside>
+  The built-in sandbox needs no install on Node.js 24 and 26 on macOS (Apple silicon), Linux (x64
+  and arm64), and Windows (x64). On other systems the server uses Deno.
+</Aside>
