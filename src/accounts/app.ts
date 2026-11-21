@@ -189,20 +189,23 @@ export async function createAccountApp(
   });
   // In memory per replica, like the base transport's limiter it mirrors.
   const publicLimiter = new IpRateLimiter(config.ipRps ?? 5, config.ipBurst ?? 20);
+  // As in the base transport (MCP's Origin rule), for both MCP routes: a browser on another site
+  // must not drive them, with or without a token. Non-browser clients send no Origin and pass.
+  const mcpOriginOk = (req: express.Request) => {
+    const origin = req.headers.origin;
+    return typeof origin !== 'string' || originAllowed(origin, config.origin, config.allowedOrigins ?? []);
+  };
   // Federal Register and eCFR need no sign-in. A bearer token sent here is ignored: signed-in
   // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
     if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
-    // As in the base transport (MCP's Origin rule): with no token to check, a browser on another
-    // site must not drive this endpoint. Non-browser clients send no Origin and pass.
-    const origin = req.headers.origin;
-    if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? []))
-      return res.status(403).json({ error: 'origin_not_allowed' });
+    if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
     await publicNode(req, res);
   });
   // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
   // must work in both modes. The SDK reads the body only after the token checks below pass.
   app.all(ACCOUNT_MCP_PATH, async (req, res) => {
+    if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
     const challenge = (status: number, error: string) =>
       res
         .status(status)

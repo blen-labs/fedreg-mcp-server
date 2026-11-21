@@ -177,9 +177,9 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(response.status, await response.clone().text()).toBe(200);
     return { ...await response.json() as any, clientId: a.client.client_id };
   }
-  async function mcp(token: string | undefined, code = 'return 42;', path = '/mcp/account') {
+  async function mcp(token: string | undefined, code = 'return 42;', path = '/mcp/account', origin?: string) {
     const response = await fetch(`${config.origin}${path}`, {
-      method: 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'execute', 'Mcp-Protocol-Version': '2026-07-28' },
+      method: 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(origin ? { origin } : {}), 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'execute', 'Mcp-Protocol-Version': '2026-07-28' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'execute', arguments: { code }, _meta: {
         'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': { name: 'auth-test', version: '1' }, 'io.modelcontextprotocol/clientCapabilities': {},
       } } }),
@@ -418,6 +418,12 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     await (await service.auth.$context).adapter.update({ model: 'user', where: [{ field: 'id', value: alice.id }], update: { emailVerified: false } });
     expect((await mcp(a.access_token)).status).toBe(401);
     await (await service.auth.$context).adapter.update({ model: 'user', where: [{ field: 'id', value: alice.id }], update: { emailVerified: true } });
+  });
+  it('rejects a foreign Origin on /mcp/account even with a valid token', async () => {
+    const a = await token();
+    expect((await mcp(a.access_token, 'return 42;', '/mcp/account', 'https://evil.example')).status).toBe(403);
+    expect((await mcp(a.access_token, 'return 42;', '/mcp/account', config.origin)).status).toBe(200);
+    expect((await mcp(a.access_token)).status).toBe(200);
   });
   it('rotates refresh tokens and honors access token revocation', async () => {
     const a = await token();
