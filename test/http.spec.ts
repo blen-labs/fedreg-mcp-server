@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MockAgent } from 'undici';
 import { gzipSync } from 'node:zlib';
-import type { IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { IpRateLimiter, clientIp } from '../src/server/ipRateLimiter.js';
 import { SubjectQuota } from '../src/util/quotas.js';
 import { HttpClient } from '../src/util/httpClient.js';
 import { UpstreamGate } from '../src/util/upstreamGate.js';
+import { ExecutionLimiter } from '../src/util/executionLimiter.js';
+import { runWithSignal } from '../src/util/executionContext.js';
 
 describe('IpRateLimiter', () => {
   it('allows up to burst then denies', () => {
@@ -252,6 +255,127 @@ describe('HttpClient upstream protection (429 retry, gate, in-flight sharing)', 
     const started = Date.now();
     (await gate.acquire())();
     expect(Date.now() - started).toBeGreaterThanOrEqual(45); // paused for the capped Retry-After
+  });
+});
+
+describe('HttpClient cancellation', () => {
+  let agent: MockAgent;
+  const ORIGIN = 'https://api.example.gov';
+  beforeEach(() => { agent = new MockAgent(); agent.disableNetConnect(); });
+  afterEach(async () => { await agent.close(); });
+  const client = (extra: Record<string, unknown> = {}) => new HttpClient({ baseUrl: ORIGIN, dispatcher: agent, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0, ...extra });
+
+  // undici 6's MockAgent ignores an abort during a mocked delay, so these use a real loopback
+  // server that never answers /slow and records when its connection is torn down.
+  async function hangingServer() {
+    let dropped = 0;
+    const server = createServer((req, res) => {
+      if (req.url === '/slow') { res.on('close', () => { dropped++; }); return; }
+      res.setHeader('content-type', 'application/json').end('{"next":true}');
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    return {
+      baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+      /** Resolves once `n` connections have been torn down by the client, or fails after 2 s. */
+      async dropped(n: number) { for (let i = 0; i < 40 && dropped < n; i++) await new Promise(r => setTimeout(r, 50)); return dropped; },
+      close: () => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }),
+    };
+  }
+
+  it('aborts the upstream request and frees the gate slot when the caller aborts', async () => {
+    const up = await hangingServer();
+    try {
+      const gate = new UpstreamGate({ concurrency: 1, ratePerSec: 1000, burst: 1, maxWaitMs: 5000 });
+      const c = new HttpClient({ baseUrl: up.baseUrl, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0, gate });
+      const controller = new AbortController();
+      const slow = c.call({ path: '/slow', signal: controller.signal });
+      setTimeout(() => controller.abort(), 50);
+      await expect(slow).rejects.toMatchObject({ name: 'AbortError' });
+      expect(await c.call({ path: '/next' })).toEqual({ next: true });
+      expect(await up.dropped(1)).toBe(1);
+    } finally { await up.close(); }
+  });
+
+  it('uses the execution signal from AsyncLocalStorage, and refuses to start when it is already aborted', async () => {
+    const up = await hangingServer();
+    try {
+      const c = new HttpClient({ baseUrl: up.baseUrl, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0 });
+      const controller = new AbortController();
+      const slow = runWithSignal(controller.signal, () => c.call({ path: '/slow' }));
+      setTimeout(() => controller.abort(), 50);
+      await expect(slow).rejects.toMatchObject({ name: 'AbortError' });
+      expect(await up.dropped(1)).toBe(1);
+      await expect(runWithSignal(controller.signal, () => c.call({ path: '/next' }))).rejects.toMatchObject({ name: 'AbortError' });
+    } finally { await up.close(); }
+  });
+
+  it('stops a call that is queued behind the gate', async () => {
+    // A gate that never admits: the call must hand it the abort signal so the queued wait ends.
+    let received: AbortSignal | undefined;
+    const gate = {
+      acquire: (signal?: AbortSignal) => new Promise<() => void>((_, reject) => {
+        received = signal;
+        signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+      }),
+      pause: () => {},
+    };
+    const c = client({ gate });
+    const controller = new AbortController();
+    const queued = c.call({ path: '/queued', signal: controller.signal });
+    setTimeout(() => controller.abort(), 30);
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(received?.aborted).toBe(true);
+  });
+
+  it('removes an aborted waiter from the real gate queue', async () => {
+    const gate = new UpstreamGate({ concurrency: 1, ratePerSec: 1000, burst: 1000, maxWaitMs: 5000 });
+    const held = await gate.acquire();
+    const controller = new AbortController();
+    const waiting = gate.acquire(controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
+    held();
+    // The aborted waiter is gone, so it does not take the freed slot.
+    let second = false;
+    const next = gate.acquire().then(r => { second = true; return r; });
+    await new Promise(r => setTimeout(r, 10));
+    expect(second).toBe(true);
+    (await next)();
+  });
+
+  it('stops waiting out a retry backoff', async () => {
+    agent.get(ORIGIN).intercept({ path: '/flaky', method: 'GET' }).reply(503, '').times(3);
+    const c = client({ retries: 2 });
+    const controller = new AbortController();
+    const t0 = Date.now();
+    const call = c.call({ path: '/flaky', signal: controller.signal });
+    setTimeout(() => controller.abort(), 50);
+    await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+    expect(Date.now() - t0).toBeLessThan(200);
+  });
+
+  it('keeps a shared in-flight request alive while another caller still waits on it', async () => {
+    agent.get(ORIGIN).intercept({ path: '/shared', method: 'GET' }).reply(200, { shared: true }).delay(100);
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 10 });
+    const controller = new AbortController();
+    const first = c.call({ path: '/shared', signal: controller.signal });
+    const second = c.call({ path: '/shared' });
+    controller.abort();
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await second).toEqual({ shared: true });
+  });
+});
+
+describe('ExecutionLimiter', () => {
+  it('caps executions globally and per subject, and releases once', () => {
+    const lim = new ExecutionLimiter(3, 2);
+    const a1 = lim.tryAcquire('a'), a2 = lim.tryAcquire('a');
+    expect('release' in a1 && 'release' in a2).toBe(true);
+    expect(lim.tryAcquire('a')).toMatchObject({ error: expect.stringMatching(/already have 2/) });
+    lim.tryAcquire('b');
+    expect(lim.tryAcquire('c')).toMatchObject({ error: expect.stringMatching(/maximum of 3/) });
+    if ('release' in a1) { a1.release(); a1.release(); }
+    expect('release' in lim.tryAcquire('c')).toBe(true);
   });
 });
 

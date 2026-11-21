@@ -204,6 +204,8 @@ The most common knobs (full list and defaults in [`.env.example`](./.env.example
 | `FEDREG_UPSTREAM_RATE_PER_SEC` | `10` | Federal Register / eCFR requests started per second, per API, shared by all users. |
 | `FEDREG_UPSTREAM_MAX_WAIT_MS` | `15000` | Longest a call waits for a slot before failing with `RateLimited`. |
 | `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` | `100` | Caps Federal Register + eCFR calls per `execute()` run (`CallBudgetExceeded`). |
+| `FEDREG_MAX_CONCURRENT_EXECUTIONS` | `8` | Executions running at once across the server; beyond it `execute` returns `Busy` immediately. |
+| `FEDREG_MAX_EXECUTIONS_PER_SUBJECT` | `2` | Executions one authenticated subject may run at once (`Busy` beyond; not applied on stdio). |
 | `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide cap on regs upstream calls/hour (protects the shared key). In-memory; with N replicas, divide by N. Must be ≥ 1. |
 | `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-subject regs calls/hour (HTTP mode only; skipped on stdio; one shared `anonymous` bucket under `--insecure`). Must be ≥ 1. |
 | `FEDREG_AUTH_PROVIDER` | `none` | `none` (stdio, or HTTP with `--insecure`) / `generic-oidc` / `clerk` / `workos` / `auth0` / `accounts`. Unknown values stop startup. |

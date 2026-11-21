@@ -9,6 +9,7 @@ import { buildCorpus } from '../src/search/corpus.js';
 import { pickSandbox } from '../src/sandbox/index.js';
 import type { CatalogDeps } from '../src/server/toolCatalog.js';
 import { SubjectQuota } from '../src/util/quotas.js';
+import { ExecutionLimiter } from '../src/util/executionLimiter.js';
 import { SignJWT, exportJWK, generateKeyPair } from 'jose';
 type SigningKey = Parameters<SignJWT['sign']>[0];
 
@@ -88,7 +89,7 @@ function meta() {
   };
 }
 
-async function post(url: string, body: unknown, headers: Record<string, string> = {}) {
+async function post(url: string, body: unknown, headers: Record<string, string> = {}, signal?: AbortSignal) {
   const r = await fetch(url, {
     method: 'POST',
     headers: {
@@ -97,6 +98,7 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
       ...headers,
     },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   const text = await r.text();
   return {
@@ -115,7 +117,7 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
 async function rpc(
   method: string,
   params: Record<string, unknown> = {},
-  opts: { id?: number; name?: string; headers?: Record<string, string>; target?: string } = {},
+  opts: { id?: number; name?: string; headers?: Record<string, string>; target?: string; signal?: AbortSignal } = {},
 ) {
   const name = opts.name ?? (params.name as string | undefined);
   return post(
@@ -127,6 +129,7 @@ async function rpc(
       ...(name ? { 'mcp-name': name } : {}),
       ...opts.headers,
     },
+    opts.signal,
   );
 }
 
@@ -522,5 +525,37 @@ describe('per-IP rate limit behind a reverse proxy', () => {
     try {
       expect([await status('203.0.113.1'), await status('203.0.113.2'), await status('203.0.113.3')]).toEqual([200, 200, 429]);
     } finally { await h.close(); }
+  });
+});
+
+describe('Client disconnect cancels the execution', () => {
+  it('frees the execution slot when the HTTP client goes away', async ({ skip }) => {
+    if (!sandboxAvailable) return skip();
+    const h = await startHttp({ ...deps, executionLimiter: new ExecutionLimiter(1, 1) }, {
+      host: '127.0.0.1', port: 0, rps: 1000, burst: 1000, subjectDailyQuota: 1_000_000, insecure: true, auth: { provider: 'none' }, publicOrigin: 'http://127.0.0.1',
+    });
+    const target = `http://127.0.0.1:${h.port}`;
+    const run = (code: string, timeoutMs: number, signal?: AbortSignal) =>
+      rpc('tools/call', { name: 'execute', arguments: { code, timeoutMs } }, { target, ...(signal ? { signal } : {}) });
+    try {
+      const controller = new AbortController();
+      const hanging = run('await new Promise(() => {})', 60_000, controller.signal).catch(() => 'aborted');
+      await new Promise(r => setTimeout(r, 400));
+      // The only slot is taken while the client is connected.
+      const busy = await run('return 1', 5000);
+      expect(JSON.parse((busy.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text)).toMatchObject({ ok: false, error: { name: 'Busy' } });
+      controller.abort();
+      await hanging;
+      // The slot is free again well before the 60 s execution timeout.
+      let next: { ok?: boolean; value?: unknown } | undefined;
+      for (let i = 0; i < 30 && !next?.ok; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        const r = await run('return 7', 5000);
+        next = JSON.parse((r.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text);
+      }
+      expect(next).toMatchObject({ ok: true, value: 7 });
+    } finally {
+      await h.close();
+    }
   });
 });

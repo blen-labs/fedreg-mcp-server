@@ -7,6 +7,7 @@ import type { Sdk } from '../sdk/bindings.js';
 import type { SandboxRunner } from '../sandbox/types.js';
 import type { Corpus } from '../search/corpus.js';
 import type { SubjectQuota } from '../util/quotas.js';
+import type { ExecutionLimiter } from '../util/executionLimiter.js';
 
 export interface ToolDescriptor {
   name: string;
@@ -14,7 +15,8 @@ export interface ToolDescriptor {
   description: string;
   annotations: ToolAnnotations;
   inputSchema: Record<string, unknown>;
-  handler: (args: unknown) => Promise<unknown>;
+  /** `signal` aborts when the client cancels the request or disconnects. */
+  handler: (args: unknown, ctx?: { signal?: AbortSignal }) => Promise<unknown>;
 }
 
 export interface CatalogDeps {
@@ -25,6 +27,10 @@ export interface CatalogDeps {
   regsMaxCallsPerExecute: number;
   regsSubjectQuota?: SubjectQuota;
   publicMaxCallsPerExecute?: number;
+  /** Caps simultaneous executions (global and per subject). */
+  executionLimiter?: ExecutionLimiter;
+  /** Aborts all executions on shutdown. */
+  shutdownSignal?: AbortSignal;
 }
 
 export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDescriptor[] {
@@ -58,7 +64,7 @@ export function buildCatalog(deps: CatalogDeps, requestCtx?: RequestCtx): ToolDe
       description:
         `Run JavaScript inside a sandbox (no net, fs, env, or subprocess). Plain JS only — TypeScript type annotations are rejected. Globals: ${names}. Top-level await is allowed; \`return\` the value you want as the result.`,
       inputSchema: zodToJsonSchema(ExecuteInput),
-      handler: async (args) => execute(ExecuteInput.parse(args), deps, requestCtx),
+      handler: async (args, ctx) => execute(ExecuteInput.parse(args), deps, { ...requestCtx, ...(ctx?.signal ? { signal: ctx.signal } : {}) }),
     },
   ];
 }

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { execute, PUBLIC_MAX_CALLS_PER_EXECUTE } from '../src/tools/execute.js';
+import { ExecutionLimiter } from '../src/util/executionLimiter.js';
+import { currentSignal } from '../src/util/executionContext.js';
+import { TEARDOWN } from '../src/sandbox/types.js';
 import { SubjectQuota } from '../src/util/quotas.js';
 import type { SandboxRunner, ExecuteOptions, RpcBridge } from '../src/sandbox/types.js';
 
@@ -113,5 +116,141 @@ describe('per-subject regs quota', () => {
     const deps = { sdk, sandbox: fakeRunner(4), regsMaxCallsPerExecute: 100, regsSubjectQuota: new SubjectQuota(1, 3_600_000) };
     const res = await execute({ code: '', timeoutMs: 1000, memoryMb: 64 }, deps) as { value: Array<{ ok: boolean }> };
     expect(res.value.every(r => r.ok)).toBe(true); // all 4 pass; quota skipped without a subject
+  });
+});
+
+const input = { code: '', timeoutMs: 1000, memoryMb: 64 };
+const okResult = { ok: true, value: 1, logs: [] as string[], durationMs: 0 };
+
+/** A runner whose executions stay running until `finish()`; records the abort signals it was given. */
+function blockingRunner() {
+  const signals: AbortSignal[] = [];
+  const waiting: Array<() => void> = [];
+  const runner: SandboxRunner = {
+    kind: 'unavailable',
+    available: async () => true,
+    execute(opts: ExecuteOptions) {
+      if (opts.signal) signals.push(opts.signal);
+      return new Promise(resolve => {
+        waiting.push(() => resolve(okResult));
+        opts.signal?.addEventListener('abort', () => resolve({ ok: false, logs: [], error: { name: 'AbortError', message: 'aborted' }, durationMs: 0 }), { once: true });
+      });
+    },
+  };
+  return { runner, signals, finish: () => { for (const w of waiting.splice(0)) w(); } };
+}
+
+const tick = () => new Promise(r => setTimeout(r, 10));
+
+describe('execution limiter', () => {
+  it('returns Busy past the global cap and admits again once an execution ends', async () => {
+    const { runner, finish } = blockingRunner();
+    const deps = { sdk, sandbox: runner, regsMaxCallsPerExecute: 1, executionLimiter: new ExecutionLimiter(2, 2) };
+    const running = [execute(input, deps, { subject: 'a' }), execute(input, deps, { subject: 'b' })];
+    await tick();
+    expect(await execute(input, deps, { subject: 'c' })).toMatchObject({ ok: false, error: { name: 'Busy', message: expect.stringMatching(/maximum of 2/) } });
+    finish();
+    await Promise.all(running);
+    expect(await execute(input, { ...deps, sandbox: fakeRunner(0) }, { subject: 'c' })).toMatchObject({ ok: true });
+  });
+
+  it('returns Busy past the per-subject cap without blocking other subjects', async () => {
+    const { runner, finish } = blockingRunner();
+    const deps = { sdk, sandbox: runner, regsMaxCallsPerExecute: 1, executionLimiter: new ExecutionLimiter(8, 2) };
+    const running = [execute(input, deps, { subject: 'a' }), execute(input, deps, { subject: 'a' })];
+    await tick();
+    expect(await execute(input, deps, { subject: 'a' })).toMatchObject({ ok: false, error: { name: 'Busy', message: expect.stringMatching(/already have 2/) } });
+    const other = execute(input, deps, { subject: 'b' });
+    await tick();
+    finish();
+    expect(await other).toMatchObject({ ok: true });
+    await Promise.all(running);
+  });
+
+  it('admits at most the cap out of 25 simultaneous calls from one subject', async () => {
+    const { runner, finish } = blockingRunner();
+    const deps = { sdk, sandbox: runner, regsMaxCallsPerExecute: 1, executionLimiter: new ExecutionLimiter(8, 2) };
+    const all = Array.from({ length: 25 }, () => execute(input, deps, { subject: 'one' }));
+    await tick();
+    finish();
+    const results = await Promise.all(all) as Array<{ error?: { name: string } }>;
+    expect(results.filter(r => r.error?.name === 'Busy').length).toBe(23);
+  });
+
+  it('frees the slot when the sandbox throws', async () => {
+    const limiter = new ExecutionLimiter(1, 1);
+    const throwing: SandboxRunner = { kind: 'unavailable', available: async () => true, async execute() { throw new Error('boom'); } };
+    await expect(execute(input, { sdk, sandbox: throwing, regsMaxCallsPerExecute: 1, executionLimiter: limiter })).rejects.toThrow('boom');
+    expect('release' in limiter.tryAcquire()).toBe(true);
+  });
+
+  it('keeps the slot until a lingering sandbox process has exited', async () => {
+    let exited!: () => void;
+    const gone = new Promise<void>(r => { exited = r; });
+    const lingering: SandboxRunner = { kind: 'unavailable', available: async () => true,
+      async execute() { return Object.defineProperty({ ...okResult }, TEARDOWN, { value: gone }); } };
+    const limiter = new ExecutionLimiter(1, 1);
+    const deps = { sdk, sandbox: lingering, regsMaxCallsPerExecute: 1, executionLimiter: limiter };
+    expect(await execute(input, deps)).toMatchObject({ ok: true });
+    expect(await execute(input, deps)).toMatchObject({ ok: false, error: { name: 'Busy' } }); // still quarantined
+    exited();
+    await tick();
+    expect(await execute(input, deps)).toMatchObject({ ok: true }); // released once the process exited
+  });
+});
+
+describe('cancellation', () => {
+  it('does not start when shutdown or the request is already aborted', async () => {
+    let started = false;
+    const sandbox: SandboxRunner = { kind: 'unavailable', available: async () => true, async execute() { started = true; return okResult; } };
+    const shut = new AbortController(); shut.abort();
+    expect(await execute(input, { sdk, sandbox, regsMaxCallsPerExecute: 1, shutdownSignal: shut.signal })).toMatchObject({ ok: false, error: { name: 'AbortError' } });
+    const req = new AbortController(); req.abort();
+    expect(await execute(input, { sdk, sandbox, regsMaxCallsPerExecute: 1 }, { signal: req.signal })).toMatchObject({ ok: false, error: { name: 'AbortError' } });
+    expect(started).toBe(false);
+  });
+
+  it('aborts the sandbox when the client cancels, and frees the slot', async () => {
+    const { runner, signals } = blockingRunner();
+    const limiter = new ExecutionLimiter(1, 1);
+    const req = new AbortController();
+    const running = execute(input, { sdk, sandbox: runner, regsMaxCallsPerExecute: 1, executionLimiter: limiter }, { signal: req.signal });
+    await tick();
+    expect(signals[0]!.aborted).toBe(false);
+    req.abort();
+    expect(await running).toMatchObject({ ok: false, error: { name: 'AbortError' } });
+    expect(signals[0]!.aborted).toBe(true);
+    expect('release' in limiter.tryAcquire()).toBe(true);
+  });
+
+  it('aborts the sandbox on server shutdown', async () => {
+    const { runner, signals } = blockingRunner();
+    const shut = new AbortController();
+    const running = execute(input, { sdk, sandbox: runner, regsMaxCallsPerExecute: 1, shutdownSignal: shut.signal });
+    await tick();
+    shut.abort();
+    expect(await running).toMatchObject({ ok: false, error: { name: 'AbortError' } });
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it('gives upstream calls the execution signal, aborted by cancel and by the end of the execution', async () => {
+    const seen: Array<AbortSignal | undefined> = [];
+    const probeSdk = { ...sdk, methods: { regs: { 'documents.search': async () => { seen.push(currentSignal()); return {}; } } } };
+    const req = new AbortController();
+    const once: SandboxRunner = { kind: 'unavailable', available: async () => true,
+      async execute(_o: ExecuteOptions, rpc: RpcBridge) { await rpc.dispatch({ binding: 'regs', path: ['documents', 'search'], args: [{}] }); return okResult; } };
+    await execute(input, { sdk: probeSdk, sandbox: once, regsMaxCallsPerExecute: 5 }, { signal: req.signal });
+    expect(seen[0]).toBeDefined();
+    expect(seen[0]!.aborted).toBe(true); // the execution has ended
+    const live: Array<AbortSignal | undefined> = [];
+    const probeSdk2 = { ...sdk, methods: { regs: { 'documents.search': async () => { live.push(currentSignal()); return {}; } } } };
+    const hold: SandboxRunner = { kind: 'unavailable', available: async () => true,
+      async execute(_o: ExecuteOptions, rpc: RpcBridge) { await rpc.dispatch({ binding: 'regs', path: ['documents', 'search'], args: [{}] }); await new Promise(r => setTimeout(r, 30)); return okResult; } };
+    const running = execute(input, { sdk: probeSdk2, sandbox: hold, regsMaxCallsPerExecute: 5 }, { signal: req.signal });
+    await tick();
+    expect(live[0]!.aborted).toBe(false);
+    req.abort();
+    expect(live[0]!.aborted).toBe(true);
+    await running;
   });
 });

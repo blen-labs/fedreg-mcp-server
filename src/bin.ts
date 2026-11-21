@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { startStdio } from './server/stdio.js';
 import { startHttp, type HttpHandle } from './server/http.js';
-import { buildSupervisor, UPSTREAM_DEFAULTS, type SupervisorConfig } from './supervisor/index.js';
+import { buildSupervisor, EXECUTION_DEFAULTS, UPSTREAM_DEFAULTS, type SupervisorConfig } from './supervisor/index.js';
 import { PUBLIC_MAX_CALLS_PER_EXECUTE } from './tools/execute.js';
 import type { SandboxKind } from './sandbox/types.js';
 import { log } from './util/logger.js';
@@ -72,6 +72,7 @@ async function main(): Promise<void> {
 
   const accounts = args.http && process.env.FEDREG_AUTH_PROVIDER === 'accounts';
   if (accounts && args.insecure) throw new Error('Account authentication cannot be combined with --insecure');
+  const shutdownController = new AbortController();
   const cfg: SupervisorConfig = {
     frBaseUrl: process.env.FEDREG_FR_BASE_URL ?? 'https://www.federalregister.gov/api/v1',
     ecfrBaseUrl: process.env.FEDREG_ECFR_BASE_URL ?? 'https://www.ecfr.gov/api',
@@ -87,6 +88,9 @@ async function main(): Promise<void> {
     sandbox: args.sandbox,
     // Authenticated HTTP serves many callers from one process: user code runs only in Deno.
     processIsolation: args.http && !args.insecure,
+    maxConcurrentExecutions: atLeastOne(process.env.FEDREG_MAX_CONCURRENT_EXECUTIONS, EXECUTION_DEFAULTS.maxConcurrent),
+    maxExecutionsPerSubject: atLeastOne(process.env.FEDREG_MAX_EXECUTIONS_PER_SUBJECT, EXECUTION_DEFAULTS.perSubject),
+    shutdownSignal: shutdownController.signal,
     // Public upstreams (fr, ecfr) see one client: this server. Each must be >= 1.
     upstreamConcurrency: atLeastOne(process.env.FEDREG_UPSTREAM_CONCURRENCY, UPSTREAM_DEFAULTS.concurrency),
     upstreamRatePerSec: atLeastOne(process.env.FEDREG_UPSTREAM_RATE_PER_SEC, UPSTREAM_DEFAULTS.ratePerSec),
@@ -152,6 +156,7 @@ async function main(): Promise<void> {
   // Graceful shutdown (Railway sends SIGTERM, K8s sends SIGTERM, Ctrl-C sends SIGINT)
   const shutdown = async (signal: string) => {
     log.info('shutdown.start', { signal });
+    shutdownController.abort();
     try {
       if (handle) await handle.close();
     } catch (err) {
