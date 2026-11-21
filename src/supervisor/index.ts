@@ -28,6 +28,11 @@ export interface SupervisorConfig {
   /** Longest a call waits for an upstream slot before failing with RateLimited. */
   upstreamMaxWaitMs?: number;
   publicMaxCallsPerExecute?: number;
+  /**
+   * Authenticated HTTP serving: user code must run in a separate OS process (Deno only; never
+   * the in-process isolate). See pickSandbox.
+   */
+  processIsolation?: boolean;
 }
 
 export const UPSTREAM_DEFAULTS = { concurrency: 8, ratePerSec: 10, maxWaitMs: 15_000 } as const;
@@ -45,7 +50,7 @@ export async function buildSupervisor(cfg: SupervisorConfig): Promise<CatalogDep
   const sources = getSources(sourceCfg);
   const sdk = buildSdk(sourceCfg);
   const corpus = buildCorpus(sources);
-  const sandbox = await pickSandbox(cfg.sandbox);
+  const sandbox = await pickSandbox(cfg.sandbox, { processIsolation: cfg.processIsolation });
   const regsSubjectQuota = new SubjectQuota(cfg.regsSubjectRatePerHour, 60 * 60 * 1000);
   return {
     sdk, sandbox, corpus, regsMaxCallsPerExecute: cfg.regsMaxCallsPerExecute, regsSubjectQuota,

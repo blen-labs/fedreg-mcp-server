@@ -5,8 +5,7 @@ import { buildMcpServer, MCP_PROTOCOL_VERSION } from './mcpServer.js';
 import type { CatalogDeps } from './toolCatalog.js';
 import { IpRateLimiter, clientIp } from './ipRateLimiter.js';
 import { SubjectQuota } from '../util/quotas.js';
-import { buildVerifier, type AuthConfig } from './authz.js';
-import type { JWTPayload } from 'jose';
+import { buildVerifier, AuthConfigError, InsufficientScopeError, type AuthConfig } from './authz.js';
 import { oauthProtectedResource } from './wellKnown.js';
 import { log } from '../util/logger.js';
 
@@ -24,7 +23,11 @@ export interface HttpOptions {
   subjectDailyQuota: number;
   auth: AuthConfig;
   insecure?: boolean;
-  /** Allowed Host header values for DNS rebinding protection. Pass [] to disable. */
+  /**
+   * Extra Host header values accepted (DNS-rebinding protection). The public origin's host and
+   * loopback hosts on the listening port are always accepted. `['*']` disables the check
+   * (unsafe; only behind a proxy that validates Host itself).
+   */
   allowedHosts?: string[];
   /**
    * Extra Origin header values allowed on the MCP endpoint (exact origin strings,
@@ -72,28 +75,29 @@ export function originAllowed(originHeader: string, ownOrigin: string, allowlist
   }
 }
 
+/** The token of an `Authorization: Bearer <token>` header; the scheme is case-insensitive (RFC 9110). */
+export function bearerToken(header: string | undefined): string | undefined {
+  return /^bearer +(\S+)$/i.exec(header ?? '')?.[1];
+}
+
 function subjectOf(ctx: McpRequestContext): string | undefined {
   const s = ctx.authInfo?.extra?.[SUBJECT_KEY];
   return typeof s === 'string' ? s : undefined;
 }
 
-/**
- * Scopes actually granted to the presented token, read from the standard OAuth claims
- * (`scope` as a space-delimited string, or `scp` as an array).
- *
- * Deliberately NOT `opts.auth.scopes` — that is the server's advertised
- * `scopes_supported` list, and copying it here would hand every caller an `AuthInfo`
- * claiming every configured scope regardless of what its token was granted.
- */
-function grantedScopes(claims: JWTPayload): string[] {
-  const raw = claims.scope ?? claims.scp;
-  if (typeof raw === 'string') return raw.split(' ').filter(Boolean);
-  if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === 'string');
-  return [];
-}
+const isLoopbackHost = (host: string) => ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host.toLowerCase());
 
 export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<HttpHandle> {
   const verifier = buildVerifier(opts.auth);
+  if (!verifier && !opts.insecure) {
+    throw new AuthConfigError('--http needs authentication: set FEDREG_AUTH_PROVIDER (generic-oidc, clerk, workos, auth0) with FEDREG_AUTH_ISSUER, FEDREG_AUTH_AUDIENCE and FEDREG_AUTH_JWKS_URL, use FEDREG_AUTH_PROVIDER=accounts, or pass --insecure for an unauthenticated local server.');
+  }
+  const disableHostCheck = opts.allowedHosts?.length === 1 && opts.allowedHosts[0] === '*';
+  const explicitHosts = (opts.allowedHosts ?? []).filter(h => h !== '*').map(h => h.toLowerCase());
+  const publicUrl = opts.publicOrigin ? new URL(opts.publicOrigin) : undefined;
+  if (!isLoopbackHost(opts.host) && !publicUrl && !explicitHosts.length && !disableHostCheck) {
+    throw new AuthConfigError(`Listening on ${opts.host} needs the hostnames clients use: set FEDREG_PUBLIC_ORIGIN (e.g. https://mcp.example.com) or FEDREG_ALLOWED_HOSTS. Requests are checked against them to block DNS rebinding.`);
+  }
   const limiter = new IpRateLimiter(opts.rps, opts.burst);
   const quota = new SubjectQuota(opts.subjectDailyQuota);
 
@@ -122,15 +126,14 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       const ip = clientIp(req, opts.clientIpHeader);
       if (!limiter.allow(ip)) return reply(res, 429, { error: 'rate_limited' });
 
-      // DNS rebinding protection: validate Host header against allowlist when provided.
-      if (opts.allowedHosts && opts.allowedHosts.length > 0) {
-        const host = String(req.headers.host ?? '').toLowerCase();
-        if (!opts.allowedHosts.includes(host)) {
-          return reply(res, 421, { error: 'host_not_allowed', host });
-        }
+      // DNS rebinding protection: the Host header must be one we were configured with. The
+      // trusted origin is never derived from the request itself.
+      const host = String(req.headers.host ?? '').toLowerCase();
+      if (!disableHostCheck && !trustedHosts.has(host)) {
+        return reply(res, 421, { error: 'host_not_allowed' });
       }
 
-      const origin = opts.publicOrigin ?? `http://${req.headers.host ?? `${opts.host}:${opts.port}`}`;
+      const origin = ownOrigin;
       const url = new URL(req.url ?? '/', origin);
 
       if (url.pathname === RESOURCE_METADATA_PATH && req.method === 'GET') {
@@ -145,7 +148,7 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
         // Origin validation (MCP spec MUST): a browser-originated cross-site request
         // must not reach the transport. Non-browser clients send no Origin and pass.
         const originHeader = req.headers.origin;
-        if (typeof originHeader === 'string' && !originAllowed(originHeader, origin, opts.allowedOrigins ?? [])) {
+        if (typeof originHeader === 'string' && !originAllowed(originHeader, origin, [...(opts.allowedOrigins ?? []), ...(publicUrl ? [publicUrl.origin] : [])])) {
           return reply(res, 403, { error: 'origin_not_allowed', origin: originHeader });
         }
 
@@ -154,26 +157,33 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
         let subject = 'anonymous';
         let token = '';
         let scopes: string[] = [];
-        if (!opts.insecure) {
-          const auth = req.headers.authorization;
-          if (!auth?.startsWith('Bearer ')) {
+        if (verifier && !opts.insecure) {
+          const bearer = bearerToken(req.headers.authorization);
+          if (!bearer) {
             res.writeHead(401, {
               'content-type': 'application/json',
               'www-authenticate': `Bearer resource_metadata="${origin}${RESOURCE_METADATA_PATH}"`,
             });
             return res.end(JSON.stringify({ error: 'unauthorized' }));
           }
-          token = auth.slice(7);
+          token = bearer;
           try {
             const ctx = await verifier.verify(token);
             subject = ctx.subject;
-            scopes = grantedScopes(ctx.claims);
+            scopes = ctx.scopes;
           } catch (err) {
+            if (err instanceof InsufficientScopeError) {
+              res.writeHead(403, {
+                'content-type': 'application/json',
+                'www-authenticate': `Bearer resource_metadata="${origin}${RESOURCE_METADATA_PATH}", error="insufficient_scope", scope="${err.required.join(' ')}"`,
+              });
+              return res.end(JSON.stringify({ error: 'insufficient_scope' }));
+            }
             res.writeHead(401, {
               'content-type': 'application/json',
               'www-authenticate': `Bearer resource_metadata="${origin}${RESOURCE_METADATA_PATH}", error="invalid_token"`,
             });
-            return res.end(JSON.stringify({ error: 'invalid_token', detail: (err as Error).message }));
+            return res.end(JSON.stringify({ error: 'invalid_token' })); // verifier details stay server-side
           }
           const q = quota.consume(subject);
           if (!q.allowed) {
@@ -201,9 +211,21 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
     }
   });
 
-  await new Promise<void>((resolve) => server.listen(opts.port, opts.host, () => resolve()));
+  let ownOrigin = '';
+  let trustedHosts = new Set<string>();
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(opts.port, opts.host, () => resolve()); });
   const addr = server.address();
   const actualPort = typeof addr === 'object' && addr ? addr.port : opts.port;
+  ownOrigin = publicUrl?.origin ?? `http://127.0.0.1:${actualPort}`;
+  trustedHosts = new Set([
+    ...explicitHosts,
+    ...(publicUrl ? [publicUrl.host.toLowerCase()] : []),
+    // Local clients and the container health check always reach us on loopback.
+    ...['localhost', '127.0.0.1', '[::1]'].map(h => `${h}:${actualPort}`),
+  ]);
+  if (opts.insecure && !isLoopbackHost(opts.host)) {
+    log.warn('http.insecure_public', { host: opts.host, note: 'unauthenticated server reachable beyond this machine' });
+  }
   log.info('http.listening', {
     host: opts.host, port: actualPort,
     insecure: opts.insecure ?? false,

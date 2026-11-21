@@ -82,7 +82,8 @@ describe('dynamic binding injection', () => {
   it('deno supervisor never embeds user code or binding names (they arrive by message)', () => {
     expect(SUPERVISOR_SOURCE).not.toMatch(/\bfr\b|ecfr|regs/);
     expect(SUPERVISOR_SOURCE).toContain('crypto.getRandomValues');
-    expect(SUPERVISOR_SOURCE).toContain("'Deno', 'postMessage'");
+    // V8 builds no code from strings in the sandbox process, so the supervisor must not ask it to.
+    expect(SUPERVISOR_SOURCE).not.toContain('new Function');
   });
 
   it('isolate injects bindings as working proxies (gated on availability)', async ({ skip }) => {
@@ -175,8 +176,13 @@ describe('deno runner isolation (gated on availability)', () => {
     const forged = await run("writeFrame({ kind: 'result', ok: true, value: 'forged' }); clearTimeout(timer); while (true) {}", { timeoutMs: 300 });
     expect(forged.ok).toBe(false);
     expect(forged.value).toBeUndefined();
+    // The Function constructor is refused outright (no code generation from strings) ...
     const ambient = await run('const c = "constr" + "uctor"; const F = (async () => {})[c][c]; return F("return [typeof Deno, typeof self.fetch, typeof self.postMessage, typeof self.Worker]")();');
-    expect(ambient).toMatchObject({ ok: true, value: ['undefined', 'undefined', 'undefined', 'undefined'] });
+    expect(ambient).toMatchObject({ ok: false, error: { name: 'EvalError' } });
+    // ... and runtime globals the preflight accepts by name are gone, so the runtime alone decides.
+    const gone = ['self', 'navigator', 'postMessage', 'close', 'crypto', 'Blob', 'Request', 'caches',
+      'setTimeout', 'setImmediate', 'structuredClone', 'performance', 'location'];
+    expect(await run(`return [${gone.map(n => `typeof ${n}`).join(', ')}];`)).toMatchObject({ ok: true, value: gone.map(() => 'undefined') });
   });
 
   it('resolves only after its child process has exited', async ({ skip }) => {

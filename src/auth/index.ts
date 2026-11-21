@@ -1,1 +1,1 @@
-export { buildVerifier, type AuthConfig, type AuthContext, type Verifier } from '../server/authz.js';
+export { buildVerifier, type AuthConfig, type AuthContext, type Verifier, type AuthProvider } from '../server/authz.js';

@@ -5,11 +5,14 @@ import { buildSupervisor, UPSTREAM_DEFAULTS, type SupervisorConfig } from './sup
 import { PUBLIC_MAX_CALLS_PER_EXECUTE } from './tools/execute.js';
 import type { SandboxKind } from './sandbox/types.js';
 import { log } from './util/logger.js';
+import type { AuthProvider } from './server/authz.js';
 
 interface CliArgs {
   http: boolean;
   port: number;
   host: string;
+  /** True when HOST or --host chose the bind address explicitly. */
+  hostExplicit: boolean;
   sandbox: SandboxKind;
   insecure: boolean;
 }
@@ -19,6 +22,7 @@ function parseArgs(argv: string[]): CliArgs {
     http: false,
     port: Number(process.env.PORT ?? 8080),
     host: process.env.HOST ?? '0.0.0.0',
+    hostExplicit: Boolean(process.env.HOST),
     sandbox: (process.env.FEDREG_SANDBOX as SandboxKind | undefined) ?? 'auto',
     insecure: false,
   };
@@ -27,13 +31,15 @@ function parseArgs(argv: string[]): CliArgs {
     if (a === '--http') args.http = true;
     else if (a === '--insecure') args.insecure = true;
     else if (a === '--port') args.port = Number(argv[++i]);
-    else if (a === '--host') args.host = String(argv[++i]);
+    else if (a === '--host') { args.host = String(argv[++i]); args.hostExplicit = true; }
     else if (a === '--sandbox') args.sandbox = argv[++i] as SandboxKind;
     else if (a === '--help' || a === '-h') {
       printHelp();
       process.exit(0);
     }
   }
+  // An unauthenticated server runs anyone's code: keep it on this machine unless told otherwise.
+  if (args.insecure && !args.hostExplicit) args.host = '127.0.0.1';
   return args;
 }
 
@@ -42,10 +48,10 @@ function printHelp(): void {
 
   --http                 Run Streamable HTTP transport (default: stdio)
   --port N               HTTP port (default 8080, env PORT)
-  --host H               HTTP bind host (default 0.0.0.0, env HOST)
+  --host H               HTTP bind host (default 0.0.0.0; 127.0.0.1 with --insecure; env HOST)
   --sandbox auto|isolate|deno
                          Sandbox runner (default auto, env FEDREG_SANDBOX)
-  --insecure             HTTP without auth (DEV ONLY)
+  --insecure             HTTP without authentication (local development; binds loopback by default)
   -h, --help             Show this help
 `);
 }
@@ -79,6 +85,8 @@ async function main(): Promise<void> {
     cacheTtlMs: Number(process.env.FEDREG_CACHE_TTL_MS ?? 300_000),
     cacheMaxItems: Number(process.env.FEDREG_CACHE_MAX_ITEMS ?? 2000),
     sandbox: args.sandbox,
+    // Authenticated HTTP serves many callers from one process: user code runs only in Deno.
+    processIsolation: args.http && !args.insecure,
     // Public upstreams (fr, ecfr) see one client: this server. Each must be >= 1.
     upstreamConcurrency: atLeastOne(process.env.FEDREG_UPSTREAM_CONCURRENCY, UPSTREAM_DEFAULTS.concurrency),
     upstreamRatePerSec: atLeastOne(process.env.FEDREG_UPSTREAM_RATE_PER_SEC, UPSTREAM_DEFAULTS.ratePerSec),
@@ -134,7 +142,6 @@ async function main(): Promise<void> {
         issuer: process.env.FEDREG_AUTH_ISSUER,
         audience: process.env.FEDREG_AUTH_AUDIENCE,
         jwksUrl: process.env.FEDREG_AUTH_JWKS_URL,
-        resource: process.env.FEDREG_AUTH_RESOURCE,
         scopes: process.env.FEDREG_AUTH_SCOPES?.split(',').map(s => s.trim()).filter(Boolean),
       },
     });
@@ -156,7 +163,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
-type AuthConfigProvider = 'none' | 'embedded' | 'generic-oidc' | 'clerk' | 'workos' | 'auth0';
+type AuthConfigProvider = AuthProvider;
 
 main().catch(err => {
   log.error('bin.fatal', { error: (err as Error).message, stack: (err as Error).stack });

@@ -207,10 +207,13 @@ Bearer authentication is gated by `FEDREG_AUTH_PROVIDER`:
 
 | Provider | How tokens are verified |
 |----------|-------------------------|
-| `none`   | No verification. Combine with `--insecure` (HTTP only). |
-| `embedded` | **No verification.** Any bearer token is accepted as subject `anonymous`, same as `none`. DEV ONLY — never expose this to a network. |
-| `generic-oidc` | JWKS via `jose` against `FEDREG_AUTH_JWKS_URL`. |
+| `none`   | No verification — valid only with `--insecure` (local development, loopback by default). `--http` with `none` and without `--insecure` refuses to start. |
+| `generic-oidc` | JWKS via `jose` against `FEDREG_AUTH_JWKS_URL` (https, or http on loopback). `FEDREG_AUTH_ISSUER` and `FEDREG_AUTH_AUDIENCE` are required; asymmetric algorithms only; `exp` and `sub` required; every `FEDREG_AUTH_SCOPES` scope required (403 `insufficient_scope`). |
 | `clerk`, `workos`, `auth0` | Aliases of `generic-oidc` — no presets; set `FEDREG_AUTH_JWKS_URL`, `FEDREG_AUTH_ISSUER`, and `FEDREG_AUTH_AUDIENCE` for your tenant. |
+
+Any other provider value stops startup. Authenticated HTTP (OIDC or accounts) runs `execute` only in
+the Deno process sandbox: `--sandbox isolate` is refused and `auto` never falls back to the
+in-process isolate.
 
 The HTTP transport also enforces:
 
@@ -218,8 +221,10 @@ The HTTP transport also enforces:
   carry an `Origin` header and are rejected with 403 unless the origin is the
   server's own, a loopback origin, or listed in `FEDREG_ALLOWED_ORIGINS`.
   Requests without an `Origin` header (every non-browser MCP client) pass.
-- **DNS rebinding protection** — `FEDREG_ALLOWED_HOSTS` allowlist on the
-  Host header.
+- **DNS rebinding protection** — the Host header must be the
+  `FEDREG_PUBLIC_ORIGIN` host, an `FEDREG_ALLOWED_HOSTS` entry, or loopback on
+  the listening port; binding a non-loopback address without either setting is
+  a startup error (`FEDREG_ALLOWED_HOSTS=*` disables the check).
 - **Per-IP rate limit** — token bucket with `FEDREG_IP_RPS` sustained rate
   and `FEDREG_IP_BURST` burst, keyed on the TCP peer. Behind a reverse proxy,
   set `FEDREG_CLIENT_IP_HEADER` to the header the proxy overwrites with the
@@ -259,7 +264,7 @@ src/
   sdk/                     # fr/ecfr/regs clients + sources registry + types
   sandbox/                 # isolate + deno runners, AST preflight
   search/                  # BM25 + corpus loader
-  auth/                    # auth re-exports (embedded dev minter is unused)
+  auth/                    # auth re-exports
   supervisor/              # builds SDK + picks sandbox
   util/                    # http client, logger, quotas
 schema/

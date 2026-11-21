@@ -7,13 +7,15 @@ export interface ExecuteOptions {
   bindings?: string[];
   /** Overrides for the runner's byte budgets. */
   limits?: Partial<SandboxLimits>;
+  /** Aborts the execution (client cancelled, server shutting down). */
+  signal?: AbortSignal;
 }
 
 export interface ExecuteResult {
   ok: boolean;
   value?: unknown;
   logs: string[];
-  error?: { name: string; message: string; stack?: string; status?: number };
+  error?: { name: string; message: string; status?: number };
   durationMs: number;
 }
 
@@ -31,6 +33,18 @@ export interface RpcCall {
   args: unknown[];
 }
 
-export interface RpcBridge {
-  dispatch(call: RpcCall): Promise<{ ok: boolean; value?: unknown; error?: { name: string; message: string; status?: number } }>;
+export interface RpcContext {
+  /** Aborted when the execution ends; in-flight and queued upstream work must stop. */
+  signal?: AbortSignal;
 }
+
+export interface RpcBridge {
+  dispatch(call: RpcCall, ctx?: RpcContext): Promise<{ ok: boolean; value?: unknown; error?: { name: string; message: string; status?: number } }>;
+}
+
+/**
+ * Attached (non-enumerably) to a result whose sandbox process had not yet exited when the result
+ * was returned. Resolves once it has. Callers must not release execution capacity before then.
+ */
+export const TEARDOWN = Symbol('fedreg.sandbox.teardown');
+export type WithTeardown<T> = T & { [TEARDOWN]?: Promise<void> };
