@@ -299,7 +299,12 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       { path: '/privacy-policy', title: 'Privacy policy', source: 'privacy-policy.md' },
       { path: '/terms', title: 'Terms of service', source: 'terms.md' },
     ];
-    const plain = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
+    const plain = (html: string) => {
+      // Strip tags until none are left: one pass can leave a tag assembled from the pieces around a removed one.
+      let text = html;
+      for (let prev = ''; prev !== text; ) { prev = text; text = text.replace(/<[^>]*>/g, ''); }
+      return text.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/&amp;/g, '&');
+    };
     for (const { path, title, source } of pages) {
       const headings = [...readFileSync(new URL(`../legal/${source}`, import.meta.url), 'utf8').matchAll(/^## (.+)$/gm)].map((m) => m[1]!);
       expect(headings.length).toBeGreaterThan(3);
