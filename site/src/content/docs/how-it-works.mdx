@@ -52,7 +52,8 @@ regulations.gov limits each key, 1,000 requests an hour by default. So the serve
   retries that call once. It never retries a `429` from regulations.gov.
 - Caps the calls in one `execute` run, by default at 100 for the Federal Register and the eCFR
   together and 30 for regulations.gov.
-- Caps regulations.gov at 1,000 calls an hour for each key by default.
+- Paces regulations.gov for each key: a shared key gets a token bucket that holds 1,000 calls and
+  refills at 1,000 an hour; a hosted account's key gets a fixed hourly window of 1,000 calls.
 - Caches responses, for 5 minutes by default, so a repeated question does not spend quota.
 - Runs at most 2 programs at once for each signed-in person on a hosted server, and 8 in all.
 

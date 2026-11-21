@@ -37,8 +37,11 @@ too.
 
 - **1,000 requests an hour.** api.data.gov applies this default to each key, across all of its
   APIs. A key that passes the limit is blocked for up to an hour, and the API answers `429`.
-- **A shared server keeps below it.** By default the server allows one key at most 1,000
-  regulations.gov calls an hour, and a program at most 30 calls in one `execute` run.
+- **The server paces each key.** A self-hosted server's shared key gets a token bucket: 1,000
+  calls to start with, refilled at 1,000 an hour (about one every 3.6 seconds), so a busy hour can
+  briefly go past 1,000 and api.data.gov may then answer `429`. On the hosted server, each
+  account's key has a fixed hourly window of 1,000 calls, kept in its database. Either way a
+  program makes at most 30 regulations.gov calls in one `execute` run.
 - **Need more?** Ask the API owner, as api.data.gov's
   [rate limit page](https://api.data.gov/docs/rate-limits/) says.
 

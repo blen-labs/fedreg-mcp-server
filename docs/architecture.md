@@ -295,5 +295,5 @@ schema/
 test/                      # vitest specs
 examples/                  # snippets you can paste into `execute`
 deploy/                    # Dockerfile, railway.toml, RAILWAY.md
-docs/                      # this file, sdk-reference.md, migration-v2.md, release-notes/
+docs/                      # this file, sdk-reference.md, migration-v2.md, migration-v3.md, release-notes/
 ```

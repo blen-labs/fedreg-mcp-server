@@ -69,7 +69,8 @@ and sign in with Google when your client asks. Then save your own regulations.go
 [account page](https://fedreg.mcp.blenlabs.com/account), or continue without one for the Federal
 Register and the eCFR. The key is stored encrypted and used only for your requests. Without
 signing in, `https://fedreg.mcp.blenlabs.com/mcp` runs programs on the Federal Register and the
-eCFR, but `regs` calls tell you to use the sign-in URL.
+eCFR. `regs` calls there work only if the server's operator has set a shared key
+(`FEDREG_REGS_API_KEY`); otherwise they tell you to use the sign-in URL and your own key.
 
 To run your own instance instead, see [Self-host](/self-host/).
 
