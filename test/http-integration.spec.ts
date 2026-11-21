@@ -587,7 +587,8 @@ describe('request body cap', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'content-length': String(2 * 1024 * 1024) },
       }, (res) => { res.resume(); resolve(res.statusCode ?? 0); req.destroy(); });
-      req.on('error', (err) => { if (!(err as NodeJS.ErrnoException).code?.startsWith('ECONNRESET')) reject(err); });
+      // The server answers and closes before the body is done, so the write may fail with EPIPE or ECONNRESET.
+      req.on('error', (err) => { const code = (err as NodeJS.ErrnoException).code; if (code !== 'EPIPE' && code !== 'ECONNRESET') reject(err); });
       req.write('{"jsonrpc":"2.0"');
       setTimeout(() => reject(new Error('no response before the body finished')), 5000).unref();
     });
