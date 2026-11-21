@@ -425,9 +425,11 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect((await mcp(a.access_token)).status).toBe(401);
     await (await service.auth.$context).adapter.update({ model: 'user', where: [{ field: 'id', value: alice.id }], update: { emailVerified: true } });
   });
-  it('rejects a foreign Origin on /mcp/account even with a valid token', async () => {
+  it('serves hosted connectors\' Origin on /mcp/account, and refuses other sites on the anonymous /mcp', async () => {
     const a = await token();
-    expect((await mcp(a.access_token, 'return 42;', '/mcp/account', 'https://evil.example')).status).toBe(403);
+    for (const origin of ['https://claude.ai', 'https://chatgpt.com'])
+      expect((await mcp(a.access_token, 'return 42;', '/mcp/account', origin)).status, origin).toBe(200);
+    expect((await mcp(undefined, 'return 42;', '/mcp', 'https://evil.example')).status).toBe(403);
     expect((await mcp(a.access_token, 'return 42;', '/mcp/account', config.origin)).status).toBe(200);
     expect((await mcp(a.access_token)).status).toBe(200);
   });

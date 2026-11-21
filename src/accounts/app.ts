@@ -191,8 +191,10 @@ export async function createAccountApp(
   });
   // In memory per replica, like the base transport's limiter it mirrors.
   const publicLimiter = new IpRateLimiter(config.ipRps ?? 5, config.ipBurst ?? 20);
-  // As in the base transport (MCP's Origin rule), for both MCP routes: a browser on another site
-  // must not drive them, with or without a token. Non-browser clients send no Origin and pass.
+  // MCP's Origin rule for the anonymous endpoint, which runs code with no token to check: another
+  // site's page must not drive it. Non-browser clients send no Origin and pass. The signed-in
+  // endpoint accepts any Origin: hosted connectors (claude.ai, chatgpt.com) send theirs, every
+  // request carries a bearer token (never a cookie), and the Host check blocks DNS rebinding.
   const mcpOriginOk = (req: express.Request) => {
     const origin = req.headers.origin;
     return typeof origin !== 'string' || originAllowed(origin, config.origin, config.allowedOrigins ?? []);
@@ -209,7 +211,6 @@ export async function createAccountApp(
   // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
   // must work in both modes. The SDK reads the body only after the token checks below pass.
   app.all(ACCOUNT_MCP_PATH, async (req, res) => {
-    if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
     const challenge = (status: number, error: string) =>
       res
         .status(status)
