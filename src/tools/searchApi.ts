@@ -1,4 +1,4 @@
-import { z } from 'zod/v3';
+import { z } from 'zod';
 import type { Corpus } from '../search/corpus.js';
 
 export const SearchApiInput = z.object({

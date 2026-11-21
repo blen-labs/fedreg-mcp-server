@@ -52,6 +52,9 @@ const RESOURCE_METADATA_PATH = '/.well-known/oauth-protected-resource/mcp';
 /** Key the tool-catalog context off the subject this request authenticated as. */
 const SUBJECT_KEY = 'fedreg.subject';
 
+/** Largest MCP request body accepted: an `execute` program plus the JSON-RPC envelope is far smaller. */
+export const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
+
 /** Cap on echoed error text: handler rejections quote caller-supplied headers and body. */
 const MAX_LOGGED_ERROR_CHARS = 300;
 
@@ -108,6 +111,7 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
     (ctx) => buildMcpServer(deps, { subject: subjectOf(ctx) }),
     {
       legacy: 'stateless',
+      maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
       // This server declares only `tools`, but the SDK routes `subscriptions/listen`
       // regardless and would otherwise hold up to 1024 long-lived SSE streams per handler
       // — unbounded long-lived state of exactly the kind `FEDREG_MAX_SESSIONS` used to cap.
@@ -121,7 +125,8 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
     onerror: (err) => log.warn('mcp.adapter.error', { error: truncate(err.message) }),
   });
 
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  // Never rejects: every failure is answered inside (500 at worst), so the request is never left hanging.
+  const handle = async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const ip = clientIp(req, opts.clientIpHeader);
       if (!limiter.allow(ip)) return reply(res, 429, { error: 'rate_limited' });
@@ -209,7 +214,8 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       log.error('http.unhandled', { error: (err as Error).message, stack: (err as Error).stack });
       if (!res.headersSent) reply(res, 500, { error: 'internal' });
     }
-  });
+  };
+  const server = createServer((req, res) => { void handle(req, res); });
 
   let ownOrigin = '';
   let trustedHosts = new Set<string>();

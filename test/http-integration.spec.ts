@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MockAgent } from 'undici';
+import type { Server } from 'node:http';
 import type { Tool } from '@modelcontextprotocol/server';
 import { expectToolMetadata } from './tool-metadata.js';
 import { startHttp, type HttpHandle } from '../src/server/http.js';
@@ -336,7 +337,7 @@ describe('Legacy 2025-era compatibility', () => {
 describe('Auth enforcement (OIDC, signed tokens from a local issuer)', () => {
   let secured: HttpHandle;
   let secBase: string;
-  let jwks: import('node:http').Server;
+  let jwks: Server;
   let issuerKey: SigningKey;
   let otherKey: SigningKey;
   const ISSUER = 'https://issuer.test';

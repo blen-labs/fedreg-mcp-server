@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { Keyring, type Sealed, digest } from './crypto.js';
+import { type Keyring, type Sealed, digest } from './crypto.js';
 
 /** Personal credential owner derived exclusively from the authenticated user. */
 export const personalOwner = (userId: string) => `user:${userId}`;

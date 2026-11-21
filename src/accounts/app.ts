@@ -11,7 +11,7 @@ import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
 import { log } from '../util/logger.js';
 import { IpRateLimiter, clientIp } from '../server/ipRateLimiter.js';
-import { originAllowed } from '../server/http.js';
+import { originAllowed, MAX_REQUEST_BODY_BYTES } from '../server/http.js';
 import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +52,16 @@ export function allowedRedirect(value: unknown) {
     return false;
   }
 }
+
+/** The columns of a Better Auth `oauthAccessToken` row that bearer checks read. */
+type AccessTokenRow = {
+  userId?: string | null;
+  clientId: string;
+  revoked?: boolean | Date | null;
+  expiresAt: Date | string;
+  resources?: string[] | null;
+  scopes?: string[] | string | null;
+};
 
 export async function createAccountApp(
   config: AccountConfig,
@@ -99,14 +109,14 @@ export async function createAccountApp(
   };
   const mcp = createMcpHandler(
     ctx => buildMcpServer(deps, { subject: ctx.authInfo?.extra?.userId as string | undefined }),
-    { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.mcp_handler_error') },
+    { legacy: 'stateless', maxSubscriptions: 0, maxRequestBodySize: MAX_REQUEST_BODY_BYTES, onerror: () => log.warn('account.mcp_handler_error') },
   );
   // Anonymous endpoint: the same tools, no token read or required. Each client address is its
   // own subject, so the per-subject execution cap stops one anonymous client from taking every
   // execution slot from everyone else.
   const publicMcp = createMcpHandler(
     ctx => buildMcpServer(publicDeps, { subject: ctx.authInfo?.extra?.anonymousSubject as string | undefined }),
-    { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.public_mcp_handler_error') },
+    { legacy: 'stateless', maxSubscriptions: 0, maxRequestBodySize: MAX_REQUEST_BODY_BYTES, onerror: () => log.warn('account.public_mcp_handler_error') },
   );
   const resource = `${config.origin}${ACCOUNT_MCP_PATH}`;
   const foreignOrigin = (req: express.Request) =>
@@ -227,7 +237,7 @@ export async function createAccountApp(
     // Opaque tokens are checked against their hashed database row on every request, so
     // revocation, client disabling, user deletion and loss of email verification apply immediately.
     const context = await auth.$context;
-    const token = await context.adapter.findOne<any>({
+    const token = await context.adapter.findOne<AccessTokenRow>({
       model: 'oauthAccessToken',
       where: [{ field: 'token', value: digest(value) }],
     });
@@ -239,11 +249,11 @@ export async function createAccountApp(
     )
       return challenge(401, 'invalid_token');
     const [client, user] = await Promise.all([
-      context.adapter.findOne<any>({
+      context.adapter.findOne<{ disabled?: boolean | null }>({
         model: 'oauthClient',
         where: [{ field: 'clientId', value: token.clientId }],
       }),
-      context.adapter.findOne<any>({
+      context.adapter.findOne<{ id: string; emailVerified?: boolean | null }>({
         model: 'user',
         where: [{ field: 'id', value: token.userId }],
       }),

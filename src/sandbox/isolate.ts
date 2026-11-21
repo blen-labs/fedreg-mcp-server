@@ -2,7 +2,10 @@ import type { ExecuteOptions, ExecuteResult, RpcBridge, SandboxRunner } from './
 import { preflight } from './policy.js';
 import { DEFAULT_LIMITS, LOG_LINE_OVERHEAD, LOG_TRUNCATED, LogSink, MAX_ERROR_MESSAGE, boundMessage, checkRpcArgs, finishValue, memoryLimitExceeded, policyMessage, resultTooLarge, type SandboxLimits } from './limits.js';
 
-type Ivm = any; // isolated-vm ships its own types, but it is an optional native dependency.
+// isolated-vm is an optional native dependency loaded at runtime, so its module type is not
+// imported (a build without it must still typecheck).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Ivm = any;
 
 async function loadIvm(): Promise<Ivm> {
   const mod = await import('isolated-vm') as Record<string, unknown> & { default?: Record<string, unknown> };

@@ -1,4 +1,4 @@
-import { HttpClient } from '../util/httpClient.js';
+import { type HttpClient } from '../util/httpClient.js';
 
 export type RegsRange = { ge?: string; le?: string };
 export interface RegsListParams {

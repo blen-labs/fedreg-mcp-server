@@ -37,6 +37,7 @@ it('rejects unsafe origins, missing secrets, and unsafe OAuth redirects', () => 
   const invalid = { FEDREG_PUBLIC_ORIGIN: 'https://example.com', BETTER_AUTH_SECRET: 's'.repeat(32), ENCRYPTION_KEYS_JSON: '{"key":"sensitive-key-material"' };
   try { loadAccountConfig(invalid); throw new Error('Expected invalid JSON to fail'); }
   catch (error) { expect(String(error)).not.toContain('sensitive-key-material'); expect(String(error)).toContain('must be valid JSON'); }
+  // eslint-disable-next-line no-script-url -- asserting that a javascript: redirect is refused
   for (const url of ['http://evil.example/cb', 'javascript:alert(1)', 'https://user:pass@example.com', 'https://example.com/#fragment']) expect(allowedRedirect(url)).toBe(false);
   expect(allowedRedirect('https://claude.ai/api/mcp/auth_callback')).toBe(true);
   expect(allowedRedirect('http://127.0.0.1:1234/cb')).toBe(true);
@@ -335,7 +336,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const denied = await authorize(browser, false);
     expect(denied.code).toBeNull(); expect(denied.callback.searchParams.get('error')).toBe('access_denied');
     const a = await authorize();
-    expect((await exchange(a.client.client_id, { grant_type: 'authorization_code', code: a.code!, code_verifier: randomToken(), redirect_uri: a.client.redirect_uris[0] })).status).toBe(401);
+    expect((await exchange(a.client.client_id, { grant_type: 'authorization_code', code: a.code!, code_verifier: randomToken(), redirect_uri: a.client.redirect_uris[0] })).status).toBe(400); // RFC 6749 §5.2 invalid_grant
   });
   it('routes each token to its owner, redacts upstream echoes, and applies rotation/removal on the next request', async () => {
     const a = await token(), b = await token(other);
