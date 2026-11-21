@@ -7,6 +7,8 @@ export interface PortalState {
   keyConnected?: boolean;
   /** Answer for saving a key: an error message, or success. */
   saveKeyError?: string;
+  /** A failure that is not about the key (an expired connection request, a failed removal). */
+  requestError?: string;
   localConnection?: boolean;
 }
 
@@ -42,8 +44,16 @@ export async function mockServer(page: Page, state: PortalState = {}) {
         client: 'Claude', destination: 'claude.ai', local: state.localConnection ?? false, email: EMAIL,
         key: { personal: connected },
       });
+    if (path === '/api/portal/connect' && method === 'POST')
+      return state.requestError
+        ? json(route, 400, { error: state.requestError })
+        : state.saveKeyError
+          ? json(route, 400, { error: state.saveKeyError, field: 'apiKey' })
+          : json(route, 200, { url: `/consent?${OAUTH_QUERY}` });
     if (path === '/api/portal/keys' && method === 'POST')
-      return state.saveKeyError ? json(route, 400, { error: state.saveKeyError }) : json(route, 200, {});
+      return state.saveKeyError ? json(route, 400, { error: state.saveKeyError, field: 'apiKey' }) : json(route, 200, {});
+    if (path === '/api/portal/keys/delete' && method === 'POST')
+      return state.requestError ? json(route, 500, { error: state.requestError }) : json(route, 200, {});
     return json(route, 404, { error: 'Not mocked.' });
   });
 }

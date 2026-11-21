@@ -293,12 +293,17 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect((await send(browser, '/api/portal/connect', payload, 'https://evil.example')).status).toBe(403);
     expect((await send(browser, '/api/portal/connect', { ...payload, oauth_query: `${oauth_query}&client_id=attacker` })).status).toBe(400);
     expect((await send(browser, '/api/portal/connect', { ...payload, owner: personalOwner(bob.id) })).status).toBe(400);
+    // Not about a typed key: no field, so the page shows a notice instead of a field error.
+    const expired = await send(browser, '/api/portal/connect', { ...payload, oauth_query: `${oauth_query}&client_id=attacker` });
+    expect(await expired.json()).toEqual({ error: 'Connection authorization failed.' });
     const info = await browser(`${config.origin}/api/portal/connect?oauth_query=${encodeURIComponent(oauth_query)}`);
     expect(await info.json()).toMatchObject({ email: alice.email, client: 'Test assistant', personal: { connected: false } });
     expect((await send(browser, '/api/portal/connect', { ...payload, apiKey: key })).status).toBe(200);
     expect(await store.getKey(personalOwner(alice.id))).toBe(key);
     validationStatus = 403;
-    expect((await send(browser, '/api/portal/connect', { ...payload, apiKey: 'z'.repeat(40) })).status).toBe(400);
+    const rejectedOnConnect = await send(browser, '/api/portal/connect', { ...payload, apiKey: 'z'.repeat(40) });
+    expect(rejectedOnConnect.status).toBe(400);
+    expect((await rejectedOnConnect.json() as any).field).toBe('apiKey');
     validationStatus = 200;
     expect(await store.getKey(personalOwner(alice.id))).toBe(key);
     const denied = await send(browser, '/api/portal/connect', { oauth_query, decision: 'deny' });
@@ -321,7 +326,13 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(JSON.stringify(rows.rows)).not.toContain(key);
     expect(await (await browser(`${config.origin}/api/portal/account`)).text()).not.toContain(key);
     validationStatus = 403;
-    expect((await send(browser, '/api/portal/keys', { apiKey: 'z'.repeat(40) })).status).toBe(400);
+    const rejected = await send(browser, '/api/portal/keys', { apiKey: 'z'.repeat(40) });
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json() as any).field).toBe('apiKey');
+    // A missing key is about the key field too.
+    const missing = await send(browser, '/api/portal/keys', {});
+    expect(missing.status).toBe(400);
+    expect((await missing.json() as any).field).toBe('apiKey');
     validationStatus = 200;
     expect(await store.getKey(personalOwner(alice.id))).toBe(key);
   });
@@ -347,6 +358,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const sameClient = await Promise.all([1, 2, 3].map(() => mcp(undefined, slow, '/mcp', undefined, '203.0.113.40')));
     expect(sameClient.filter(r => r.body.includes('Busy')).length).toBeGreaterThanOrEqual(1);
     expect((await mcp(undefined, 'return 9;', '/mcp', undefined, '203.0.113.41')).body).toContain('9');
+    // The `${...}` is sandbox source (a template literal that runs inside execute), not a typo.
+    // eslint-disable-next-line no-template-curly-in-string
     const regs = await mcp(undefined, 'try { await regs.documents.search(); } catch (e) { return `${e.name}: ${e.message}`; }', '/mcp');
     expect(regs.body).toContain('SourceUnavailable');
     expect(regs.body).toContain(`${config.origin}/mcp/account`);
@@ -396,6 +409,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     mock.get('https://api.regulations.gov')
       .intercept({ path: '/v4/documents/missing', method: 'GET', headers: { 'x-api-key': key } })
       .reply(404, { errors: [{ detail: key }] });
+    // The `${...}` is sandbox source (a template literal that runs inside execute), not a typo.
+    // eslint-disable-next-line no-template-curly-in-string
     const missing = await mcp(a.access_token, 'try { await regs.documents.get("missing"); } catch (e) { return `${e.name}: ${e.message}`; }');
     expect(missing.body).toContain('HttpError');
     expect(missing.body).toContain('404');
