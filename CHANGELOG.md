@@ -6,88 +6,87 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## [2.2.4] - 2026-11-13
 
 ### Changed
 - count only this worker's Deno children in the teardown test (#13) (sandbox)
+
 ## [2.2.3] - 2026-11-13
 
 ### Changed
 - Merge commit from fork
+
 ## [2.2.2] - 2026-11-10
 
 ### Changed
 - rename display name to Federal Regulations MCP (#12)
+
 ## [2.2.1] - 2026-10-13
 
 ### Fixed
 - accept valid regulations.gov keys and match Data.gov's sign-out (#11) (auth)
+
 ## [2.2.0] - 2026-10-13
 
 ### Added
 - keep /mcp open and move sign-in to /mcp/account (#10) (auth)
+
 ## [2.1.0] - 2026-10-13
 
 ### Added
 - add personal regulations.gov accounts with SAM.gov UX (#7) (auth)
+
 ## [2.0.11] - 2026-10-13
 
 ### Fixed
 - stop fr/ecfr calls from tripping federalregister.gov rate limits (#9) (upstream)
+
 ## [2.0.10] - 2026-10-13
 
 ### Fixed
 - key the per-IP rate limit on the real client behind proxies (#8) (http)
+
 ## [2.0.9] - 2026-10-08
 
 ### Fixed
 - request and decode gzip full-text responses (ecfr)
+
 ## [2.0.8] - 2026-09-23
 
 ### Changed
 - Correct company name and link in README
+
 ## [2.0.7] - 2026-09-23
 
 ### Changed
 - add hosted connector privacy policy and terms
+
 ## [2.0.6] - 2026-09-23
 
 ### Fixed
 - describe execute as plain JavaScript and sync docs with the SDK surface
 - restrict RPC dispatch and advertise tool safety metadata
+
 ## [2.0.5] - 2026-08-06
 
 ### Changed
 - move to Node 24 action runtimes and document the branch-only policy
+
 ## [2.0.4] - 2026-08-06
 
 ### Changed
 - enforce conventional commit subjects
+
 ## [2.0.3] - 2026-08-06
 
 ### Changed
 - pin the npm CLI version in the publish step
+
 ## [2.0.2] - 2026-08-06
 
 ### Changed
 - publish with npm CLI >= 11.5 for OIDC trusted publishing
+
 ## [2.0.1] - 2026-08-06
 
 ### Fixed
