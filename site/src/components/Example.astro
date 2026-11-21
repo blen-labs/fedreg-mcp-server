@@ -15,4 +15,4 @@ const { file } = Astro.props;
 const code = await formatSnippet(readFileSync(resolve(process.cwd(), '../examples', file), 'utf8'));
 ---
 
-<Code code={code} lang="js" />
+<Code code={code} lang="js" label={`Example: ${file}`} />
