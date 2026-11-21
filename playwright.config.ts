@@ -20,6 +20,8 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
+  // The preview servers are always started fresh: reusing whatever already listens on a port could
+  // silently test another project's build (several BLEN servers use the same ports).
   use: {
     baseURL: 'http://127.0.0.1:4173',
     trace: 'retain-on-failure',
@@ -30,12 +32,12 @@ export default defineConfig({
     {
       command: 'pnpm exec vite preview --config web/vite.config.ts --host 127.0.0.1 --port 4173 --strictPort',
       url: 'http://127.0.0.1:4173',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
     },
     {
       command: 'pnpm --dir site exec astro preview --host 127.0.0.1 --port 4174',
       url: 'http://127.0.0.1:4174/docs/',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
     },
     ...(process.env.TEST_DATABASE_URL
       ? [
