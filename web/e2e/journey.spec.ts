@@ -11,7 +11,12 @@ const ORIGIN = 'http://127.0.0.1:4175';
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 const CALLBACK = 'https://assistant.example.test/callback';
 
-test.skip(!process.env.TEST_DATABASE_URL || !process.env.JOURNEY_STATE, 'needs TEST_DATABASE_URL (PostgreSQL)');
+const journeyReady = Boolean(process.env.TEST_DATABASE_URL && process.env.JOURNEY_STATE);
+// Locally the journey is optional; in CI a missing database is a failure, not a silent skip.
+test.skip(!journeyReady && !process.env.CI, 'needs TEST_DATABASE_URL (PostgreSQL)');
+test.beforeEach(() => {
+  if (!journeyReady) throw new Error('The browser journey needs TEST_DATABASE_URL in CI.');
+});
 
 test('save a key, connect an assistant, run a program, sign out', async ({ page, context }) => {
   const state = JSON.parse(readFileSync(process.env.JOURNEY_STATE!, 'utf8')) as {
