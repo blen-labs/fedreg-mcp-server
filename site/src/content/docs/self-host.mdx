@@ -55,7 +55,8 @@ Register and the eCFR. See the
 - **Sign-in is required.** `--http` refuses to start without `--insecure` or a configured provider.
 - **Install Deno.** With sign-in, the server runs each program in a separate Deno process, and
   `execute` is unavailable without it.
-- **Name your host.** To listen on an address that is not loopback, set `FEDREG_PUBLIC_ORIGIN` or
+- **Name your host.** To listen on an address that is not loopback, set `FEDREG_PUBLIC_ORIGIN`
+  (with sign-in it is required: clients find the sign-in server through it), or, without sign-in,
   `FEDREG_ALLOWED_HOSTS`.
 
 ## Full guides

@@ -101,6 +101,12 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
   if (!isLoopbackHost(opts.host) && !publicUrl && !explicitHosts.length && !disableHostCheck) {
     throw new AuthConfigError(`Listening on ${opts.host} needs the hostnames clients use: set FEDREG_PUBLIC_ORIGIN (e.g. https://mcp.example.com) or FEDREG_ALLOWED_HOSTS. Requests are checked against them to block DNS rebinding.`);
   }
+  // With authentication, clients find the authorization server through the protected-resource
+  // metadata, whose `resource` must be the URL they connect to (RFC 9728). Beyond loopback only
+  // the configured public origin can say what that is; allowed hosts alone cannot.
+  if (verifier && !opts.insecure && !isLoopbackHost(opts.host) && !publicUrl) {
+    throw new AuthConfigError(`Authenticated serving on ${opts.host} needs FEDREG_PUBLIC_ORIGIN (e.g. https://mcp.example.com): OAuth metadata must name the URL clients connect to.`);
+  }
   const limiter = new IpRateLimiter(opts.rps, opts.burst);
   const quota = new SubjectQuota(opts.subjectDailyQuota);
 
@@ -133,8 +139,12 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
 
       // DNS rebinding protection: the Host header must be one we were configured with. The
       // trusted origin is never derived from the request itself.
+      // /health is exempt, as in account mode: platform health checks (Railway sends
+      // `Host: healthcheck.railway.app`) cannot be given a trusted Host, and the endpoint serves no
+      // user data and holds no session for a rebinding page to ride on.
       const host = String(req.headers.host ?? '').toLowerCase();
-      if (!disableHostCheck && !trustedHosts.has(host)) {
+      const isHealth = req.method === 'GET' && (req.url ?? '').split('?')[0] === '/health';
+      if (!disableHostCheck && !isHealth && !trustedHosts.has(host)) {
         return reply(res, 421, { error: 'host_not_allowed' });
       }
 

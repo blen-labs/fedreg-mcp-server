@@ -172,7 +172,7 @@ Then point any MCP client at it:
 The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id` — with a stateless legacy fallback for pre-2026 clients. It fails closed:
 
 - `--http` without `--insecure` refuses to start unless real authentication is configured (an OIDC provider, or `accounts`). OIDC tokens must carry the configured issuer and audience, an expiry and a subject, use an asymmetric algorithm, and hold every scope in `FEDREG_AUTH_SCOPES` (otherwise `403 insufficient_scope`).
-- Listening on anything but loopback requires `FEDREG_PUBLIC_ORIGIN` or `FEDREG_ALLOWED_HOSTS`: every request's `Host` must match the configured names (DNS-rebinding protection); the trusted origin is never taken from the request. Browser `Origin`s other than the server's own, loopback, or `FEDREG_ALLOWED_ORIGINS` get `403`.
+- Listening on anything but loopback requires `FEDREG_PUBLIC_ORIGIN` or `FEDREG_ALLOWED_HOSTS` (with authentication, `FEDREG_PUBLIC_ORIGIN` specifically, because OAuth metadata must name the URL clients connect to): every request's `Host` must match the configured names (DNS-rebinding protection); the trusted origin is never taken from the request. Browser `Origin`s other than the server's own, loopback, or `FEDREG_ALLOWED_ORIGINS` get `403`.
 - Request bodies are capped at 1 MiB.
 
 It also serves OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting and per-subject daily quotas. A Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the [`Dockerfile`](./deploy/Dockerfile) runs on Node 26 (LTS) with Deno included.
@@ -204,7 +204,7 @@ The knobs below are every environment variable the server reads at startup (defa
 | `FEDREG_AUTH_PROVIDER` | `none` | `none` (stdio, or HTTP with `--insecure`) / `generic-oidc` / `clerk` / `workos` / `auth0` / `accounts`. Unknown values stop startup. The OIDC providers serve every token holder with this server's own regulations.gov key, so use them only for yourself; to host for other people use `accounts`, where each user brings their own key. |
 | `FEDREG_AUTH_ISSUER` / `FEDREG_AUTH_AUDIENCE` / `FEDREG_AUTH_JWKS_URL` | — | Required for OIDC providers (JWKS over https; http only on loopback). |
 | `FEDREG_AUTH_SCOPES` | — | Comma-separated scopes every token must carry. |
-| `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (OAuth metadata, trusted Host). Required for non-loopback HTTP unless `FEDREG_ALLOWED_HOSTS` is set. |
+| `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (OAuth metadata, trusted Host). Required for authenticated non-loopback HTTP; otherwise `FEDREG_ALLOWED_HOSTS` can replace it. |
 | `FEDREG_ALLOWED_HOSTS` | — | Extra accepted `Host` values (comma-separated). |
 | `FEDREG_ALLOWED_ORIGINS` | — | Extra browser `Origin`s allowed on `/mcp` (comma-separated exact origins). |
 | `FEDREG_IP_RPS` / `FEDREG_IP_BURST` | `5` / `20` | Per-IP token bucket on the HTTP transport. |

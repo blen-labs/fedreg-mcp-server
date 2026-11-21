@@ -266,8 +266,8 @@ export async function createAccountApp(
     Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${ipOf(req) ?? 'unknown'}` } } });
     await publicNode(req, res);
   });
-  // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
-  // must work in both modes. The SDK reads the body only after the token checks below pass.
+  // No body parser: the SDK reads the body itself (capped by maxRequestBodySize, as in the base
+  // HTTP transport) and only after the token checks below pass.
   app.all(ACCOUNT_MCP_PATH, async (req, res) => {
     const challenge = (status: number, error: string) =>
       res

@@ -70,7 +70,7 @@ function atLeastOne(value: string | undefined, fallback: number): number {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  const accounts = args.http && process.env.FEDREG_AUTH_PROVIDER === 'accounts';
+  const accounts = args.http && process.env.FEDREG_AUTH_PROVIDER?.trim() === 'accounts';
   if (accounts && args.insecure) throw new Error('Account authentication cannot be combined with --insecure');
   const shutdownController = new AbortController();
   const cfg: SupervisorConfig = {

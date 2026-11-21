@@ -40,7 +40,8 @@ and the `fr.*` / `ecfr.*` / `regs.*` globals are unchanged.
    - OIDC needs `FEDREG_AUTH_ISSUER`, `FEDREG_AUTH_AUDIENCE` and an https
      `FEDREG_AUTH_JWKS_URL`; tokens need `exp` and `sub` and every `FEDREG_AUTH_SCOPES` scope.
 3. **Host validation is always on.** Binding a non-loopback address needs `FEDREG_PUBLIC_ORIGIN`
-   or `FEDREG_ALLOWED_HOSTS`. `--insecure` binds 127.0.0.1 unless `--host` or `HOST` says
+   or `FEDREG_ALLOWED_HOSTS`; with authentication it needs `FEDREG_PUBLIC_ORIGIN` (OAuth metadata
+   names it). `GET /health` is exempt, so platform health checks keep working. `--insecure` binds 127.0.0.1 unless `--host` or `HOST` says
    otherwise.
 4. **Authenticated serving runs `execute` only in Deno.** With auth configured (including
    `accounts`), `--sandbox isolate` is refused and `auto` never uses the in-process isolate.
