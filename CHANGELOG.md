@@ -23,6 +23,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+
+## [3.0.0] - 2026-11-21
+
+### Breaking
+- fail closed on HTTP auth and run hosted code only in Deno (auth)
+
+### Fixed
+- accept hosted connectors' Origin on the signed-in MCP endpoint (accounts)
+- end orphaned supervisors and cap anonymous executions per client (sandbox)
+- cap concurrent executions and stop cancelled work (execute)
+- validate Origin on /mcp/account (accounts)
+- fail closed on HTTP auth and run hosted code only in Deno (auth)
 ## [2.2.4] - 2026-11-13
 
 ### Changed
@@ -230,7 +242,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.4...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.3...v2.2.4
 [2.2.3]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.2...v2.2.3
 [2.2.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.1...v2.2.2
