@@ -1,34 +1,42 @@
+import * as product from '../../product.mjs';
+
 // The site's pages, in sidebar order. The sidebar, the Markdown copy of each page, and the page
-// actions are all built from this list. Each label is the page's title.
-export const home = { label: 'Overview', slug: 'index' };
+// actions are all built from this list. The labels below are the defaults, which suit a code-mode
+// server. A product whose pages differ (a server with no SDK, say) overrides a page's sidebar
+// label with `export const pageLabels = { 'reference/sdk': 'Search reference' }` in product.mjs,
+// keyed by slug ('index' for the home page). The page's own title is set in its frontmatter.
+const labels = product.pageLabels ?? {};
+const page = (label, slug) => ({ label: labels[slug] ?? label, slug });
+
+export const home = page('Overview', 'index');
 
 export const groups = [
   {
     label: 'Start',
     pages: [
-      { label: 'Get your keys', slug: 'keys' },
-      { label: 'Connect your assistant', slug: 'connect' },
+      page('Get your keys', 'keys'),
+      page('Connect your assistant', 'connect'),
     ],
   },
   {
     label: 'Use',
     pages: [
-      { label: 'How it works', slug: 'how-it-works' },
-      { label: 'Recipes', slug: 'recipes' },
+      page('How it works', 'how-it-works'),
+      page('Recipes', 'recipes'),
     ],
   },
   {
     label: 'Reference',
     pages: [
-      { label: 'Tools', slug: 'reference/tools' },
-      { label: 'SDK reference', slug: 'reference/sdk' },
+      page('Tools', 'reference/tools'),
+      page('SDK reference', 'reference/sdk'),
     ],
   },
   {
     label: 'Run your own',
     pages: [
-      { label: 'Self-host', slug: 'self-host' },
-      { label: 'Security', slug: 'security' },
+      page('Self-host', 'self-host'),
+      page('Security', 'security'),
     ],
   },
 ];
