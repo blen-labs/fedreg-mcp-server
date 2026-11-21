@@ -1,3 +1,16 @@
 allowBuilds:
   esbuild: true
   isolated-vm: true
+
+# Patched transitive versions for dev tooling whose own ranges lag behind security fixes
+# (pnpm audit). Remove an entry once the parent package ships the fix itself.
+overrides:
+  '@anthropic-ai/mcpb>zod': ^4.6.7
+  'external-editor>tmp': ^0.2.6
+
+# Advisories with no patched release, in dev tooling only, are listed as
+#   auditConfig:
+#     ignoreGhsas:
+#       - GHSA-xxxx-xxxx-xxxx   # why it cannot reach users; date added
+# each with a case in test/audit-exceptions.spec.ts. The scheduled security workflow fails once
+# an entry is withdrawn or gets a fix (scripts/security-audit.mjs); then remove it.
