@@ -20,8 +20,6 @@ import { resolve } from 'node:path';
 
 const CROSS_ORIGIN_PATHS =
   /^\/(?:mcp(?:\/account)?|\.well-known\/(?:oauth-protected-resource|oauth-authorization-server|openid-configuration)(?:\/[\w-]+)*|api\/auth\/(?:oauth2\/(?:register|token|revoke)|\.well-known\/(?:oauth-authorization-server|openid-configuration)))$/;
-/** The MCP endpoints, where Origin is validated (see the CORS middleware). */
-const MCP_PATHS = new Set([PUBLIC_MCP_PATH, ACCOUNT_MCP_PATH]);
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
@@ -162,19 +160,7 @@ export async function createAccountApp(
     // discovery, registration, token and /mcp from other origins. These use bearer tokens or
     // client credentials, never cookies, and the Host check above prevents DNS rebinding.
     if (CROSS_ORIGIN_PATHS.test(req.path)) {
-      if (MCP_PATHS.has(req.path)) {
-        // MCP's transport rule: a request whose Origin is not allowed gets 403. Allowed are this
-        // server's origin, loopback, and FEDREG_ALLOWED_ORIGINS; CORS echoes only those, so a
-        // browser client from another site fails at the preflight with a clear reason.
-        const origin = req.headers.origin;
-        if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? [])) {
-          log.warn('account.mcp_origin_rejected');
-          return res.status(403).json({ error: 'origin_not_allowed' });
-        }
-        res.set({ ...CORS_HEADERS, 'Access-Control-Allow-Origin': origin ?? '*', Vary: 'Origin' });
-      } else {
-        res.set(CORS_HEADERS);
-      }
+      res.set(CORS_HEADERS);
       if (req.method === 'OPTIONS')
         return res
           .status(204)
@@ -261,7 +247,13 @@ export async function createAccountApp(
   // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
     if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
-    // Origin was checked with the CORS headers above; non-browser clients send no Origin.
+    // MCP's Origin rule: with no token to check, another site's page must not drive this endpoint
+    // (it runs code). Non-browser clients send no Origin and pass. The signed-in endpoint accepts
+    // any Origin: hosted connectors (claude.ai, chatgpt.com) send theirs, every request carries a
+    // bearer token (never a cookie), and the Host check above already blocks DNS rebinding.
+    const origin = req.headers.origin;
+    if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? []))
+      return res.status(403).json({ error: 'origin_not_allowed' });
     // toNodeHandler forwards req.auth to the factory; no token is involved.
     Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${ipOf(req) ?? 'unknown'}` } } });
     await publicNode(req, res);

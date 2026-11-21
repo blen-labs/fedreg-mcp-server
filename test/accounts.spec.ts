@@ -463,20 +463,16 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect((await mcp(a.access_token)).status).toBe(401);
     await (await service.auth.$context).adapter.update({ model: 'user', where: [{ field: 'id', value: alice.id }], update: { emailVerified: true } });
   });
-  it('rejects a foreign Origin on /mcp/account even with a valid token', async () => {
+  it('serves hosted connectors\' Origin on /mcp/account, and refuses other sites on the anonymous /mcp', async () => {
     const a = await token();
-    expect((await mcp(a.access_token, 'return 42;', '/mcp/account', 'https://evil.example')).status).toBe(403);
-    // A browser client fails at the preflight with a clear status, and CORS never says `*` for
-    // an MCP endpoint; the server's own origin is echoed.
-    const preflight = (origin: string, path = '/mcp/account') => fetch(`${config.origin}${path}`, {
-      method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' },
-    });
-    for (const path of ['/mcp/account', '/mcp']) {
-      expect((await preflight('https://evil.example', path)).status).toBe(403);
-      const own = await preflight(config.origin, path);
-      expect(own.status).toBe(204);
-      expect(own.headers.get('access-control-allow-origin')).toBe(config.origin);
+    // Hosted connectors send their own Origin; a bearer token (never a cookie) authenticates them.
+    for (const origin of ['https://claude.ai', 'https://chatgpt.com']) {
+      const hosted = await mcp(a.access_token, 'return 42;', '/mcp/account', origin);
+      expect(hosted.status, origin).toBe(200);
+      expect(hosted.body).toContain('42');
     }
+    // The anonymous endpoint runs code with no token to check: another site's page is refused.
+    expect((await mcp(undefined, 'return 42;', '/mcp', 'https://evil.example')).status).toBe(403);
     // OAuth discovery stays open to every client.
     const discovery = await fetch(`${config.origin}/.well-known/oauth-protected-resource/mcp/account`, { headers: { origin: 'https://app.example' } });
     expect(discovery.headers.get('access-control-allow-origin')).toBe('*');

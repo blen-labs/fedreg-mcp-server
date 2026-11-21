@@ -25,8 +25,6 @@ and the `fr.*` / `ecfr.*` / `regs.*` globals are unchanged.
    constraints. Arguments outside them are rejected with `isError: true`, as unknown keys already
    were in v2.
 4. **Request bodies over 1 MiB** are refused on `/mcp` and both account endpoints.
-5. **Browser-based MCP clients on another origin** are refused (403) unless that origin is in
-   `FEDREG_ALLOWED_ORIGINS`. Non-browser clients send no `Origin` and are unaffected.
 
 ## Operator changes
 
