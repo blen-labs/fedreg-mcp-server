@@ -21,6 +21,6 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["src/**/*", "test/**/*", "schema/**/*.json"],
+  "include": ["src/**/*", "test/**/*", "schema/**/*.json", ".railway/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
