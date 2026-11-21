@@ -117,7 +117,7 @@ jobs:
       - name: npm package contents
         run: |
           npm pack --dry-run --json --ignore-scripts > pack.json
-          node -e "const f=JSON.parse(require('fs').readFileSync('pack.json'))[0].files.map(x=>x.path);for(const p of ['LICENSE','NOTICE','dist/bin.js','schema/fr.json','schema/ecfr.json','schema/regs.json'])if(!f.includes(p)){console.error('missing '+p);process.exit(1)};if(f.some(p=>/^(\.env|\.local|test|mcpb-build)/.test(p))){console.error('unexpected files');process.exit(1)}"
+          node -e "const f=JSON.parse(require('fs').readFileSync('pack.json'))[0].files.map(x=>x.path);for(const p of ['LICENSE','NOTICE','dist/bin.js','dist/web/THIRD_PARTY_NOTICES.txt','schema/fr.json','schema/ecfr.json','schema/regs.json'])if(!f.includes(p)){console.error('missing '+p);process.exit(1)};if(f.some(p=>/^(\.env|\.local|test|mcpb-build)/.test(p))){console.error('unexpected files');process.exit(1)}"
       - run: pnpm mcpb:prepare && pnpm mcpb:pack
       # Run the bundle as a desktop host does: plain node, minimal env, no Deno, no repo node_modules.
       - name: MCPB smoke (execute in a clean directory)
