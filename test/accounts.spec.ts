@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, get as httpGet, type Server } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Pool } from 'pg';
 import { testUtils } from 'better-auth/plugins';
 import fetchCookie from 'fetch-cookie';
@@ -95,7 +97,7 @@ class CountingStore extends Store {
 
 const database = process.env.TEST_DATABASE_URL;
 describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
-  let pool: Pool, store: CountingStore, server: Server, config: AccountConfig;
+  let pool: Pool, store: CountingStore, server: Server, config: AccountConfig, docsRoot: string;
   let service: Awaited<ReturnType<typeof createAccountApp>>;
   let helper: ReturnType<ReturnType<typeof testUtils>['init']>['context']['test'];
   let alice: any, bob: any, browser: typeof fetch, other: typeof fetch;
@@ -193,11 +195,14 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     pool = new Pool({ connectionString: database, options: `-c search_path=${schema}` });
     store = new CountingStore(pool, new Keyring('v1', { v1: randomBytes(32) }));
     await store.initialize();
+    // A minimal built docs site: /docs must be wired with its own CSP inside the account app.
+    docsRoot = mkdtempSync(join(tmpdir(), 'fedreg-docs-'));
+    writeFileSync(join(docsRoot, 'index.html'), '<html><script>window.docs=1</script><title>Docs</title></html>');
     server = createServer();
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     config = { origin: `http://127.0.0.1:${(server.address() as any).port}`, production: false,
       databaseUrl: database!, authSecret: randomToken(), googleClientId: 'fixture-google', googleClientSecret: 'fixture-secret', keyring: new Keyring('v1', { v1: randomBytes(32) }),
-      clientIpHeader: 'x-real-ip' };
+      clientIpHeader: 'x-real-ip', docsRoot };
     const deps = await buildSupervisor(cfg);
     expect(await deps.sandbox.available(), 'Deno is required for account integration tests').toBe(true);
     // Upstream regulations.gov calls go through an injected MockAgent, never the global dispatcher.
@@ -214,6 +219,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   afterAll(async () => {
     await mock?.close(); await service?.close();
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+    if (docsRoot) rmSync(docsRoot, { recursive: true, force: true });
     if (pool) { await pool.query(`DROP SCHEMA ${schema} CASCADE`); await pool.end(); }
   });
   it('discovers OAuth, challenges anonymous callers, and offers Google sign-in', async () => {
@@ -229,6 +235,22 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const google = await send(fetch, '/api/auth/sign-in/social', { provider: 'google', callbackURL: '/account' });
     expect(google.status, await google.clone().text()).toBe(200);
     expect(new URL((await google.json() as any).url).hostname).toBe('accounts.google.com');
+  });
+  it('serves the documentation site at /docs with its own CSP, behind the Host check', async () => {
+    const moved = await fetch(`${config.origin}/docs?q=1`, { redirect: 'manual' });
+    expect(moved.status).toBe(301);
+    expect(moved.headers.get('location')).toBe('/docs/?q=1');
+    const page = await fetch(`${config.origin}/docs/`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('<title>Docs</title>');
+    // The docs policy replaces the portal's, and allows the inline script only by its hash.
+    expect(page.headers.get('content-security-policy')).toContain(`'sha256-${createHash('sha256').update('window.docs=1').digest('base64')}'`);
+    expect(page.headers.get('cache-control')).toBe('public, max-age=300');
+    // fetch cannot set Host (a forbidden header), so the rebinding check goes through node:http.
+    const { port } = new URL(config.origin);
+    const status = await new Promise<number | undefined>((resolve, reject) =>
+      httpGet({ host: '127.0.0.1', port, path: '/docs/', headers: { host: 'evil.example' } }, (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject));
+    expect(status).toBe(421);
   });
   // Needs the Vite bundle: `pnpm build` (CI builds before testing). Skipped, not failed, without it.
   const webBuilt = existsSync(new URL('../dist/web/index.html', import.meta.url));
