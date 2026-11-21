@@ -93,6 +93,10 @@ process-wide **upstream gate** (`src/util/upstreamGate.ts`), built once in
 - **In-flight sharing** — identical GETs already on the wire share one request.
 - **Per-execute budget** — `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` (default
   `100`) fr + ecfr calls per `execute()` run (`CallBudgetExceeded`).
+- **Cancellation** — queued and in-flight upstream calls stop when the execution
+  they belong to is cancelled (see "Concurrency caps and cancellation" below). A
+  caller leaving a shared in-flight request does not cancel it for the others;
+  the request is aborted only once nobody waits on it.
 
 Like the regs bucket, the gate is in-memory: N replicas allow N× the rate.
 
@@ -159,6 +163,23 @@ Both runners enforce:
   `timeoutMs`). The host disposes the isolate or kills the Deno process group
   when it fires, whatever user code is awaiting; nothing user code sends can
   cancel it.
+- **Concurrency cap** — `ExecutionLimiter` (`src/util/executionLimiter.ts`) admits
+  at most `FEDREG_MAX_CONCURRENT_EXECUTIONS` (default `8`) executions at once and
+  `FEDREG_MAX_EXECUTIONS_PER_SUBJECT` (default `2`) per authenticated subject;
+  beyond either, `execute` returns a `Busy` error at once rather than queueing (an
+  execution can run for a minute). A slot is held until the sandbox process has
+  actually exited: a runner that returns while its Deno process is still being
+  reaped attaches a `TEARDOWN` promise to the result and the slot is released only
+  when it settles. The limiter is shared by `/mcp` and `/mcp/account` in account
+  mode.
+- **Cancellation** — each execution has its own `AbortController`, aborted when the
+  MCP request's signal fires (client cancel or disconnect, `ctx.mcpReq.signal`),
+  when the server begins shutdown (`shutdownSignal`, aborted first in `bin.ts`'s
+  SIGTERM/SIGINT handler), and when the execution ends. Its signal goes to the
+  runner (which kills the sandbox) and, through `AsyncLocalStorage`
+  (`src/util/executionContext.ts`), to `HttpClient`, so upstream calls waiting for
+  a gate slot, in retry backoff, or on the wire stop. An execution whose signal is
+  already aborted never starts.
 - **Memory cap** (default 64 MB: the isolate heap limit, or V8's old-space
   limit inside Deno).
 - **Byte budgets** (`src/sandbox/limits.ts`) on code, logs, SDK arguments,
@@ -207,10 +228,13 @@ Bearer authentication is gated by `FEDREG_AUTH_PROVIDER`:
 
 | Provider | How tokens are verified |
 |----------|-------------------------|
-| `none`   | No verification. Combine with `--insecure` (HTTP only). |
-| `embedded` | **No verification.** Any bearer token is accepted as subject `anonymous`, same as `none`. DEV ONLY — never expose this to a network. |
-| `generic-oidc` | JWKS via `jose` against `FEDREG_AUTH_JWKS_URL`. |
+| `none`   | No verification — valid only with `--insecure` (local development, loopback by default). `--http` with `none` and without `--insecure` refuses to start. |
+| `generic-oidc` | JWKS via `jose` against `FEDREG_AUTH_JWKS_URL` (https, or http on loopback). `FEDREG_AUTH_ISSUER` and `FEDREG_AUTH_AUDIENCE` are required; asymmetric algorithms only; `exp` and `sub` required; every `FEDREG_AUTH_SCOPES` scope required (403 `insufficient_scope`). |
 | `clerk`, `workos`, `auth0` | Aliases of `generic-oidc` — no presets; set `FEDREG_AUTH_JWKS_URL`, `FEDREG_AUTH_ISSUER`, and `FEDREG_AUTH_AUDIENCE` for your tenant. |
+
+Any other provider value stops startup. Authenticated HTTP (OIDC or accounts) runs `execute` only in
+the Deno process sandbox: `--sandbox isolate` is refused and `auto` never falls back to the
+in-process isolate.
 
 The HTTP transport also enforces:
 
@@ -218,8 +242,10 @@ The HTTP transport also enforces:
   carry an `Origin` header and are rejected with 403 unless the origin is the
   server's own, a loopback origin, or listed in `FEDREG_ALLOWED_ORIGINS`.
   Requests without an `Origin` header (every non-browser MCP client) pass.
-- **DNS rebinding protection** — `FEDREG_ALLOWED_HOSTS` allowlist on the
-  Host header.
+- **DNS rebinding protection** — the Host header must be the
+  `FEDREG_PUBLIC_ORIGIN` host, an `FEDREG_ALLOWED_HOSTS` entry, or loopback on
+  the listening port; binding a non-loopback address without either setting is
+  a startup error (`FEDREG_ALLOWED_HOSTS=*` disables the check).
 - **Per-IP rate limit** — token bucket with `FEDREG_IP_RPS` sustained rate
   and `FEDREG_IP_BURST` burst, keyed on the TCP peer. Behind a reverse proxy,
   set `FEDREG_CLIENT_IP_HEADER` to the header the proxy overwrites with the
@@ -259,7 +285,7 @@ src/
   sdk/                     # fr/ecfr/regs clients + sources registry + types
   sandbox/                 # isolate + deno runners, AST preflight
   search/                  # BM25 + corpus loader
-  auth/                    # auth re-exports (embedded dev minter is unused)
+  auth/                    # auth re-exports
   supervisor/              # builds SDK + picks sandbox
   util/                    # http client, logger, quotas
 schema/

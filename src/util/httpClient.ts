@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { gunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { log } from './logger.js';
+import { abortError, currentSignal, sleep } from './executionContext.js';
 
 const decompressGzip = promisify(gunzip);
 
@@ -34,7 +35,7 @@ export interface HttpClientOptions {
 export interface PreflightLimiter { tryTake(): boolean | Promise<boolean>; secondsUntilNext?(): number }
 
 /** What HttpClient needs from an UpstreamGate; injectable for tests. */
-export interface UpstreamGateLike { acquire(): Promise<() => void>; pause(ms: number): void }
+export interface UpstreamGateLike { acquire(signal?: AbortSignal): Promise<() => void>; pause(ms: number): void }
 
 export interface CallOptions {
   method?: 'GET' | 'POST';
@@ -43,7 +44,11 @@ export interface CallOptions {
   headers?: Record<string, string>;
   accept?: 'json' | 'xml' | 'text';
   body?: unknown;
+  /** Abort the request (and any wait for a slot). Defaults to the current execution's signal. */
+  signal?: AbortSignal;
 }
+
+interface InflightEntry { promise: Promise<unknown>; controller: AbortController; waiters: number; forget?: () => void }
 
 export class HttpClient {
   #defaultHeaders: Record<string, string>;
@@ -60,7 +65,7 @@ export class HttpClient {
   private readonly gate?: UpstreamGateLike;
   private readonly label: string;
   /** Identical GETs already on the wire; later callers share the first one's result. */
-  private readonly inflight = new Map<string, Promise<unknown>>();
+  private readonly inflight = new Map<string, InflightEntry>();
 
   constructor(opts: HttpClientOptions) {
     this.#defaultHeaders = opts.defaultHeaders ?? {};
@@ -88,23 +93,50 @@ export class HttpClient {
       log.debug('http.cache_hit', { url });
       return this.cache.get(key)!.body as T;
     }
+    const signal = o.signal ?? currentSignal();
+    if (signal?.aborted) throw abortError();
+    if (!key) return this.fetchWithRetry<T>(url, method, o, key, signal);
     // Join an identical request already on the wire rather than queueing a second one.
-    const pending = key ? this.inflight.get(key) : undefined;
-    if (pending) return pending as Promise<T>;
-    const run = this.fetchWithRetry<T>(url, method, o, key);
-    if (key) {
-      this.inflight.set(key, run);
-      run.then(() => this.inflight.delete(key), () => this.inflight.delete(key));
+    let entry = this.inflight.get(key);
+    if (!entry) {
+      const controller = new AbortController();
+      const promise = this.fetchWithRetry<T>(url, method, o, key, controller.signal);
+      const created: InflightEntry = { promise, controller, waiters: 0 };
+      const forget = () => { if (this.inflight.get(key) === created) this.inflight.delete(key); };
+      created.forget = forget;
+      entry = created;
+      promise.then(forget, forget);
+      promise.catch(() => { /* each waiter observes the rejection itself */ });
+      this.inflight.set(key, created);
     }
-    return run;
+    return this.wait<T>(entry, signal);
   }
 
-  private async fetchWithRetry<T>(url: string, method: 'GET' | 'POST', o: CallOptions, key: string): Promise<T> {
+  /** One caller's view of a shared request: it may abort its own wait without failing others. */
+  private wait<T>(entry: InflightEntry, signal?: AbortSignal): Promise<T> {
+    entry.waiters++;
+    if (!signal) return entry.promise.finally(() => { entry.waiters--; }) as Promise<T>;
+    return new Promise<T>((resolve, reject) => {
+      let done = false;
+      const finish = () => { if (done) return false; done = true; entry.waiters--; signal.removeEventListener('abort', onAbort); return true; };
+      const onAbort = () => {
+        if (!finish()) return;
+        // Once nobody waits, the shared request is dying: later identical calls must start their own.
+        if (entry.waiters === 0) { entry.forget?.(); entry.controller.abort(); }
+        reject(abortError());
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      entry.promise.then(v => { if (finish()) resolve(v as T); }, e => { if (finish()) reject(e); });
+    });
+  }
+
+  private async fetchWithRetry<T>(url: string, method: 'GET' | 'POST', o: CallOptions, key: string, signal?: AbortSignal): Promise<T> {
     const accept =
       o.accept === 'xml' ? 'application/xml,text/xml'
       : o.accept === 'text' ? 'text/plain'
       : 'application/json';
 
+    if (signal?.aborted) throw abortError();
     if (this.preflightLimiter && !(await this.preflightLimiter.tryTake())) {
       const wait = this.preflightLimiter.secondsUntilNext?.() ?? 0;
       const err = new HttpError(`${method} ${url} -> upstream rate limit reached${Number.isFinite(wait) && wait > 0 ? ` (retry in ~${wait}s)` : ''}`, 429, '');
@@ -116,9 +148,9 @@ export class HttpClient {
     let retried429 = false;
     for (;;) {
       try {
-        return await this.attempt<T>(url, method, o, accept, key);
+        return await this.attempt<T>(url, method, o, accept, key, signal);
       } catch (err) {
-        if (err instanceof GateTimeoutError) throw err;
+        if (err instanceof GateTimeoutError || (err as Error)?.name === 'AbortError') throw err;
         const status = err instanceof HttpError ? err.status : 0;
         if (status === 429) {
           const pauseMs = Math.min((err as HttpError).retryAfterMs ?? 1000, this.maxRetryAfterMs);
@@ -126,25 +158,26 @@ export class HttpClient {
           this.gate?.pause(pauseMs);
           if (!this.retry429 || retried429) throw err;
           retried429 = true;
-          await new Promise(r => setTimeout(r, pauseMs));
+          await sleep(pauseMs, signal);
           continue;
         }
         const retryable = status === 0 || status >= 500;
         if (!retryable || attempt === this.retries) throw err;
         const delay = Math.min(2 ** attempt * 250, 4000);
-        await new Promise(r => setTimeout(r, delay));
+        await sleep(delay, signal);
         attempt++;
       }
     }
   }
 
   /** One request, holding a gate slot only while it is on the wire. */
-  private async attempt<T>(url: string, method: 'GET' | 'POST', o: CallOptions, accept: string, key: string): Promise<T> {
+  private async attempt<T>(url: string, method: 'GET' | 'POST', o: CallOptions, accept: string, key: string, signal?: AbortSignal): Promise<T> {
     let release: (() => void) | undefined;
     if (this.gate) {
       try {
-        release = await this.gate.acquire();
-      } catch {
+        release = await this.gate.acquire(signal);
+      } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') throw abortError();
         throw new GateTimeoutError(`${this.label} is busy: too many requests from this server are waiting. Make fewer parallel calls or retry shortly.`);
       }
     }
@@ -161,6 +194,7 @@ export class HttpClient {
         body: o.body ? JSON.stringify(o.body) : undefined,
         bodyTimeout: this.timeoutMs,
         headersTimeout: this.timeoutMs,
+        ...(signal ? { signal } : {}),
         ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
       });
 
@@ -191,6 +225,9 @@ export class HttpClient {
       for (const [k, v] of Object.entries(res.headers)) headers[k] = Array.isArray(v) ? v.join(',') : String(v ?? '');
       if (key && this.cacheEnabled) this.cache.set(key, { status: res.statusCode, body, headers });
       return body as T;
+    } catch (err) {
+      if (signal?.aborted) throw abortError();
+      throw err;
     } finally {
       release?.();
     }

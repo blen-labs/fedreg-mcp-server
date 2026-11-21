@@ -61,9 +61,9 @@ export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpS
         // keys are now rejected rather than silently stripped by Zod (see CHANGELOG).
         inputSchema: cachedInputSchema(tool.name, tool.inputSchema),
       },
-      async (args: unknown) => {
+      async (args: unknown, ctx: { mcpReq?: { signal?: AbortSignal } }) => {
         try {
-          const result = await tool.handler(args ?? {});
+          const result = await tool.handler(args ?? {}, { signal: ctx?.mcpReq?.signal });
           return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
         } catch (err) {
           const e = err as Error;

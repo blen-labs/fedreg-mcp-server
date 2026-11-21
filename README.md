@@ -170,9 +170,11 @@ Run a shared, authenticated endpoint over Streamable HTTP:
 # Dev only — no auth, loopback-bound:
 npx @blen/fedreg-mcp-server --http --insecure --host 127.0.0.1 --port 8080
 
-# Production — auth via any OIDC issuer:
+# Production — auth via any OIDC issuer (issuer, audience and https JWKS URL are required;
+# execute runs only in the Deno sandbox, so Deno must be on PATH — the Docker image ships it):
 FEDREG_AUTH_PROVIDER=clerk \
 FEDREG_AUTH_ISSUER=https://<tenant>.clerk.accounts.dev \
+FEDREG_AUTH_AUDIENCE=https://your-host.example.com/mcp \
 FEDREG_AUTH_JWKS_URL=https://<tenant>.clerk.accounts.dev/.well-known/jwks.json \
 FEDREG_PUBLIC_ORIGIN=https://your-host.example.com \
 FEDREG_ALLOWED_HOSTS=your-host.example.com \
@@ -202,9 +204,11 @@ The most common knobs (full list and defaults in [`.env.example`](./.env.example
 | `FEDREG_UPSTREAM_RATE_PER_SEC` | `10` | Federal Register / eCFR requests started per second, per API, shared by all users. |
 | `FEDREG_UPSTREAM_MAX_WAIT_MS` | `15000` | Longest a call waits for a slot before failing with `RateLimited`. |
 | `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` | `100` | Caps Federal Register + eCFR calls per `execute()` run (`CallBudgetExceeded`). |
+| `FEDREG_MAX_CONCURRENT_EXECUTIONS` | `8` | Executions running at once across the server; beyond it `execute` returns `Busy` immediately. |
+| `FEDREG_MAX_EXECUTIONS_PER_SUBJECT` | `2` | Executions one authenticated subject may run at once (`Busy` beyond; not applied on stdio). |
 | `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide cap on regs upstream calls/hour (protects the shared key). In-memory; with N replicas, divide by N. Must be ≥ 1. |
 | `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-subject regs calls/hour (HTTP mode only; skipped on stdio; one shared `anonymous` bucket under `--insecure`). Must be ≥ 1. |
-| `FEDREG_AUTH_PROVIDER` | `none` | `none` / `embedded` / `generic-oidc` / `clerk` / `workos` / `auth0` |
+| `FEDREG_AUTH_PROVIDER` | `none` | `none` (stdio, or HTTP with `--insecure`) / `generic-oidc` / `clerk` / `workos` / `auth0` / `accounts`. Unknown values stop startup. |
 | `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (used in OAuth metadata). |
 | `FEDREG_IP_RPS` / `FEDREG_IP_BURST` | `5` / `20` | Per-IP token bucket on the HTTP transport. |
 | `FEDREG_CLIENT_IP_HEADER` | unset | Header your reverse proxy overwrites with the client address (Railway: `x-real-ip`). Required behind a proxy for the per-IP limit to see real clients. |

@@ -101,9 +101,11 @@ export async function createAccountApp(
     ctx => buildMcpServer(deps, { subject: ctx.authInfo?.extra?.userId as string | undefined }),
     { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.mcp_handler_error') },
   );
-  // Anonymous endpoint: the same tools with no subject. No token is read or required.
+  // Anonymous endpoint: the same tools, no token read or required. Each client address is its
+  // own subject, so the per-subject execution cap stops one anonymous client from taking every
+  // execution slot from everyone else.
   const publicMcp = createMcpHandler(
-    () => buildMcpServer(publicDeps, {}),
+    ctx => buildMcpServer(publicDeps, { subject: ctx.authInfo?.extra?.anonymousSubject as string | undefined }),
     { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.public_mcp_handler_error') },
   );
   const resource = `${config.origin}${ACCOUNT_MCP_PATH}`;
@@ -189,15 +191,21 @@ export async function createAccountApp(
   });
   // In memory per replica, like the base transport's limiter it mirrors.
   const publicLimiter = new IpRateLimiter(config.ipRps ?? 5, config.ipBurst ?? 20);
+  // MCP's Origin rule for the anonymous endpoint, which runs code with no token to check: another
+  // site's page must not drive it. Non-browser clients send no Origin and pass. The signed-in
+  // endpoint accepts any Origin: hosted connectors (claude.ai, chatgpt.com) send theirs, every
+  // request carries a bearer token (never a cookie), and the Host check blocks DNS rebinding.
+  const mcpOriginOk = (req: express.Request) => {
+    const origin = req.headers.origin;
+    return typeof origin !== 'string' || originAllowed(origin, config.origin, config.allowedOrigins ?? []);
+  };
   // Federal Register and eCFR need no sign-in. A bearer token sent here is ignored: signed-in
   // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
     if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
-    // As in the base transport (MCP's Origin rule): with no token to check, a browser on another
-    // site must not drive this endpoint. Non-browser clients send no Origin and pass.
-    const origin = req.headers.origin;
-    if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? []))
-      return res.status(403).json({ error: 'origin_not_allowed' });
+    if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
+    // toNodeHandler forwards req.auth to the factory; no token is involved.
+    Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${ipOf(req) ?? 'unknown'}` } } });
     await publicNode(req, res);
   });
   // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts

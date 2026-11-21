@@ -88,6 +88,14 @@ export function resultTooLarge(size: number, limits: SandboxLimits): { name: str
   };
 }
 
+/** The runtime ended the program because it outgrew `memoryMb`. */
+export function memoryLimitExceeded(memoryMb: number): { name: string; message: string } {
+  return {
+    name: 'MemoryLimitExceeded',
+    message: `The program used more memory than its limit (memoryMb: ${memoryMb}). Request fewer records (per_page), select fields, or process the data in smaller steps.`,
+  };
+}
+
 /** Longest error message any execution reports. */
 export const MAX_ERROR_MESSAGE = 4000;
 

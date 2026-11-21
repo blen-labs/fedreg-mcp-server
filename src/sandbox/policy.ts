@@ -18,6 +18,17 @@ export interface PolicyResult {
   errors: string[];
 }
 
+/**
+ * True when the wrapped program is still the one call it was built as. Code that closes the
+ * wrapping function early runs outside it, where a module accepts `import` and `export`.
+ */
+function wrapperIntact(ast: any): boolean {
+  const [statement, ...rest] = ast.body;
+  const call = statement?.type === 'ExpressionStatement' ? statement.expression : undefined;
+  return rest.length === 0 && call?.type === 'CallExpression' && call.arguments.length === 0
+    && call.callee.type === 'ArrowFunctionExpression';
+}
+
 export function preflight(code: string): PolicyResult {
   const errors: string[] = [];
   // User code is executed inside an async wrapper, so allow top-level await/return.
@@ -37,14 +48,7 @@ export function preflight(code: string): PolicyResult {
   }
 
   const wrapped = `(async () => { ${code}\n })()`;
-  let ast: Node;
-  try {
-    ast = parse(wrapped, { ecmaVersion: 2022, sourceType: 'module', allowAwaitOutsideFunction: true });
-  } catch (err) {
-    return { ok: false, errors: [...errors, `Parse error: ${(err as Error).message}`] };
-  }
-
-  simple(ast, {
+  const visitors = {
     ImportDeclaration() { errors.push('imports are not allowed'); },
     ImportExpression() { errors.push('dynamic import() is not allowed'); },
     CallExpression(node: any) {
@@ -65,14 +69,44 @@ export function preflight(code: string): PolicyResult {
       }
     },
     MemberExpression(node: any) {
-      if (!node.computed && node.property?.type === 'Identifier' && BANNED_MEMBERS.has(node.property.name)) {
-        errors.push(`access to .${node.property.name} is not allowed`);
+      // `a.constructor`, `a['constructor']` and a template literal without substitutions. A
+      // fully dynamic key (`a[k]`) cannot be decided statically: the runners are the boundary.
+      const p = node.property;
+      const name = !node.computed && p?.type === 'Identifier' ? p.name
+        : node.computed && p?.type === 'Literal' && typeof p.value === 'string' ? p.value
+        : node.computed && p?.type === 'TemplateLiteral' && p.expressions.length === 0 ? p.quasis[0]?.value?.cooked
+        : undefined;
+      if (name !== undefined && BANNED_MEMBERS.has(name)) errors.push(`access to .${name} is not allowed`);
+    },
+    // `const { constructor: F } = x` reads the same member without a MemberExpression.
+    ObjectPattern(node: any) {
+      for (const prop of node.properties) {
+        const key = prop.type === 'Property' ? prop.key : undefined;
+        const name = key?.type === 'Identifier' && !prop.computed ? key.name
+          : key?.type === 'Literal' && typeof key.value === 'string' ? key.value
+          : key?.type === 'TemplateLiteral' && key.expressions.length === 0 ? key.quasis[0]?.value?.cooked
+          : undefined;
+        if (name !== undefined && BANNED_MEMBERS.has(name)) errors.push(`access to .${name} is not allowed`);
       }
     },
     MetaProperty(node: any) {
       if (node.meta?.name === 'import') errors.push('import.meta is not allowed');
     },
-  });
+  };
+  // A script and a module read HTML-like comments (`<!--`, `-->`) differently, so one text can
+  // be two programs. A runner executes the code as one or the other: check it as both.
+  for (const sourceType of ['module', 'script'] as const) {
+    let ast: Node;
+    try {
+      ast = parse(wrapped, { ecmaVersion: 2022, sourceType, allowAwaitOutsideFunction: true });
+    } catch (err) {
+      return { ok: false, errors: [...errors, `Parse error: ${(err as Error).message}`] };
+    }
+    if (!wrapperIntact(ast)) errors.push('the code must not close the function that wraps it');
+    simple(ast, visitors);
+    // The second reading matters only when the first one found nothing.
+    if (errors.length) break;
+  }
 
   return { ok: errors.length === 0, errors };
 }

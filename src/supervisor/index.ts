@@ -5,6 +5,7 @@ import { pickSandbox } from '../sandbox/index.js';
 import { TokenBucket } from '../util/tokenBucket.js';
 import { UpstreamGate } from '../util/upstreamGate.js';
 import { SubjectQuota } from '../util/quotas.js';
+import { ExecutionLimiter } from '../util/executionLimiter.js';
 import type { CatalogDeps } from '../server/toolCatalog.js';
 import type { SandboxKind } from '../sandbox/types.js';
 
@@ -28,7 +29,19 @@ export interface SupervisorConfig {
   /** Longest a call waits for an upstream slot before failing with RateLimited. */
   upstreamMaxWaitMs?: number;
   publicMaxCallsPerExecute?: number;
+  /**
+   * Authenticated HTTP serving: user code must run in a separate OS process (Deno only; never
+   * the in-process isolate). See pickSandbox.
+   */
+  processIsolation?: boolean;
+  /** Executions running at once, in total and per subject; beyond either, execute returns Busy. */
+  maxConcurrentExecutions?: number;
+  maxExecutionsPerSubject?: number;
+  /** Aborts every execution (graceful shutdown). */
+  shutdownSignal?: AbortSignal;
 }
+
+export const EXECUTION_DEFAULTS = { maxConcurrent: 8, perSubject: 2 } as const;
 
 export const UPSTREAM_DEFAULTS = { concurrency: 8, ratePerSec: 10, maxWaitMs: 15_000 } as const;
 
@@ -45,11 +58,16 @@ export async function buildSupervisor(cfg: SupervisorConfig): Promise<CatalogDep
   const sources = getSources(sourceCfg);
   const sdk = buildSdk(sourceCfg);
   const corpus = buildCorpus(sources);
-  const sandbox = await pickSandbox(cfg.sandbox);
+  const sandbox = await pickSandbox(cfg.sandbox, { processIsolation: cfg.processIsolation });
   const regsSubjectQuota = new SubjectQuota(cfg.regsSubjectRatePerHour, 60 * 60 * 1000);
   return {
     sdk, sandbox, corpus, regsMaxCallsPerExecute: cfg.regsMaxCallsPerExecute, regsSubjectQuota,
     publicMaxCallsPerExecute: cfg.publicMaxCallsPerExecute,
+    executionLimiter: new ExecutionLimiter(
+      cfg.maxConcurrentExecutions ?? EXECUTION_DEFAULTS.maxConcurrent,
+      cfg.maxExecutionsPerSubject ?? EXECUTION_DEFAULTS.perSubject,
+    ),
+    ...(cfg.shutdownSignal ? { shutdownSignal: cfg.shutdownSignal } : {}),
   };
 }
 

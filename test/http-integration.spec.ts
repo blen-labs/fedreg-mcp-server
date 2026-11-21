@@ -9,6 +9,9 @@ import { buildCorpus } from '../src/search/corpus.js';
 import { pickSandbox } from '../src/sandbox/index.js';
 import type { CatalogDeps } from '../src/server/toolCatalog.js';
 import { SubjectQuota } from '../src/util/quotas.js';
+import { ExecutionLimiter } from '../src/util/executionLimiter.js';
+import { SignJWT, exportJWK, generateKeyPair } from 'jose';
+type SigningKey = Parameters<SignJWT['sign']>[0];
 
 let handle: HttpHandle;
 let base: string;
@@ -86,7 +89,7 @@ function meta() {
   };
 }
 
-async function post(url: string, body: unknown, headers: Record<string, string> = {}) {
+async function post(url: string, body: unknown, headers: Record<string, string> = {}, signal?: AbortSignal) {
   const r = await fetch(url, {
     method: 'POST',
     headers: {
@@ -95,6 +98,7 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
       ...headers,
     },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   const text = await r.text();
   return {
@@ -113,7 +117,7 @@ async function post(url: string, body: unknown, headers: Record<string, string> 
 async function rpc(
   method: string,
   params: Record<string, unknown> = {},
-  opts: { id?: number; name?: string; headers?: Record<string, string>; target?: string } = {},
+  opts: { id?: number; name?: string; headers?: Record<string, string>; target?: string; signal?: AbortSignal } = {},
 ) {
   const name = opts.name ?? (params.name as string | undefined);
   return post(
@@ -125,6 +129,7 @@ async function rpc(
       ...(name ? { 'mcp-name': name } : {}),
       ...opts.headers,
     },
+    opts.signal,
   );
 }
 
@@ -328,59 +333,110 @@ describe('Legacy 2025-era compatibility', () => {
   });
 });
 
-describe('Auth enforcement', () => {
+describe('Auth enforcement (OIDC, signed tokens from a local issuer)', () => {
   let secured: HttpHandle;
   let secBase: string;
+  let jwks: import('node:http').Server;
+  let issuerKey: SigningKey;
+  let otherKey: SigningKey;
+  const ISSUER = 'https://issuer.test';
+  const AUDIENCE = 'https://fedreg-mcp.test/mcp';
+  let jwksUrl: string;
+  const cfg = {
+    frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
+    regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
+  };
+  const deps = async (): Promise<CatalogDeps> => ({
+    sdk: buildSdk(cfg), sandbox: await pickSandbox('auto'), corpus: buildCorpus(getSources(cfg)),
+    regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000),
+  });
+
+  const sign = async (claims: Record<string, unknown>, opts: { key?: SigningKey; exp?: string | number | null } = {}) => {
+    const jwt = new SignJWT({ scope: 'fedreg:read', ...claims }).setProtectedHeader({ alg: 'ES256', kid: 'k1' }).setIssuedAt();
+    if (opts.exp !== null) jwt.setExpirationTime(opts.exp ?? '5m');
+    return jwt.sign(opts.key ?? issuerKey);
+  };
+  const list = (token?: string) => rpc('tools/list', {}, { target: secBase, headers: token ? { authorization: `Bearer ${token}` } : {} });
 
   beforeAll(async () => {
-    const sdk = buildSdk({
-      frBaseUrl: 'https://www.federalregister.gov/api/v1',
-      ecfrBaseUrl: 'https://www.ecfr.gov/api',
-      regsBaseUrl: 'https://api.regulations.gov',
-      userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
-    });
-    const sandbox = await pickSandbox('auto');
-    const corpus = buildCorpus(getSources({
-      frBaseUrl: 'https://www.federalregister.gov/api/v1', ecfrBaseUrl: 'https://www.ecfr.gov/api',
-      regsBaseUrl: 'https://api.regulations.gov', userAgent: 'test/0.0', timeoutMs: 5000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0,
-    }));
-    secured = await startHttp({ sdk, sandbox, corpus, regsMaxCallsPerExecute: 30, regsSubjectQuota: new SubjectQuota(1_000_000, 3_600_000) }, {
-      host: '127.0.0.1', port: 0,
-      rps: 1000, burst: 1000, subjectDailyQuota: 1_000_000,
-      insecure: false,
-      auth: { provider: 'none' }, // verifier is noop but we still require a bearer header
-      publicOrigin: 'http://127.0.0.1',
+    const pair = await generateKeyPair('ES256');
+    issuerKey = pair.privateKey;
+    otherKey = (await generateKeyPair('ES256')).privateKey;
+    const jwk = { ...(await exportJWK(pair.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' };
+    const { createServer } = await import('node:http');
+    jwks = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ keys: [jwk] })); });
+    await new Promise<void>(r => jwks.listen(0, '127.0.0.1', r));
+    jwksUrl = `http://127.0.0.1:${(jwks.address() as { port: number }).port}/jwks.json`;
+    secured = await startHttp(await deps(), {
+      host: '127.0.0.1', port: 0, rps: 1000, burst: 1000, subjectDailyQuota: 1_000_000,
+      auth: { provider: 'generic-oidc', issuer: ISSUER, audience: AUDIENCE, jwksUrl, scopes: ['fedreg:read'] },
     });
     secBase = `http://127.0.0.1:${secured.port}`;
   });
 
-  afterAll(async () => { await secured.close(); });
-
-  it('rejects unauthenticated MCP requests with 401 and resource metadata header', async () => {
-    const r = await fetch(`${secBase}/mcp`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: meta() } }),
-    });
-    expect(r.status).toBe(401);
-    expect(r.headers.get('www-authenticate') ?? '').toMatch(/resource_metadata=/);
+  afterAll(async () => {
+    await secured.close();
+    await new Promise<void>(r => jwks.close(() => r()));
   });
 
-  // Every request re-authenticates: auth is checked before the request reaches the MCP
-  // handler, and the subject the tool catalog is built with comes from that verification.
-  // There is no session id, so the 2025-era attack this replaces — tenant B reusing tenant
-  // A's session id to spend or pollute A's quota — has no carrier to travel on.
-  it('requires a bearer token on every request, not just the first', async () => {
-    const authed = await rpc('tools/list', {}, {
-      target: secBase,
-      headers: { authorization: 'Bearer test-token' },
-    });
-    expect(authed.status).toBe(200);
-    expect(authed.sessionId).toBeUndefined();
+  it('rejects requests without a bearer token with 401 and resource metadata', async () => {
+    const r = await list();
+    expect(r.status).toBe(401);
+  });
 
-    // A follow-up without credentials is rejected on its own merits.
-    const second = await rpc('tools/list', { }, { target: secBase });
-    expect(second.status).toBe(401);
+  // Every request re-authenticates; there is no session id a second caller could reuse.
+  it('accepts a valid token, on every request (no session)', async () => {
+    const token = await sign({ sub: 'user-1', iss: ISSUER, aud: AUDIENCE });
+    const ok = await list(token);
+    expect(ok.status).toBe(200);
+    expect(ok.sessionId).toBeUndefined();
+    expect((await list()).status).toBe(401);
+  });
+
+  it.each([
+    ['arbitrary text', async () => 'not-a-jwt'],
+    ['wrong signing key', async () => sign({ sub: 'u', iss: ISSUER, aud: AUDIENCE }, { key: otherKey })],
+    ['another service\'s audience', async () => sign({ sub: 'u', iss: ISSUER, aud: 'unrelated-service' })],
+    ['wrong issuer', async () => sign({ sub: 'u', iss: 'https://evil.test', aud: AUDIENCE })],
+    ['no expiration', async () => sign({ sub: 'u', iss: ISSUER, aud: AUDIENCE }, { exp: null })],
+    ['expired', async () => sign({ sub: 'u', iss: ISSUER, aud: AUDIENCE }, { exp: Math.floor(Date.now() / 1000) - 60 })],
+    ['no subject', async () => sign({ iss: ISSUER, aud: AUDIENCE })],
+  ])('rejects a token with %s (401)', async (_label, make) => {
+    expect((await list(await make())).status).toBe(401);
+  });
+
+  it('rejects a valid token without the required scope (403 insufficient_scope)', async () => {
+    const r = await list(await sign({ sub: 'u', iss: ISSUER, aud: AUDIENCE, scope: 'other' }));
+    expect(r.status).toBe(403);
+  });
+
+  it('refuses to start without real authentication or with an unknown/incomplete provider', async () => {
+    const base = { host: '127.0.0.1', port: 0, rps: 10, burst: 10, subjectDailyQuota: 10 };
+    await expect(startHttp(await deps(), { ...base, auth: { provider: 'none' } })).rejects.toThrow(/needs authentication/);
+    await expect(startHttp(await deps(), { ...base, auth: { provider: 'embedded' as 'none' } })).rejects.toThrow(/Unknown FEDREG_AUTH_PROVIDER/);
+    await expect(startHttp(await deps(), { ...base, auth: { provider: 'generic-oidc', issuer: ISSUER, jwksUrl } })).rejects.toThrow(/AUDIENCE/);
+    await expect(startHttp(await deps(), { ...base, auth: { provider: 'generic-oidc', audience: AUDIENCE, jwksUrl } })).rejects.toThrow(/ISSUER/);
+    await expect(startHttp(await deps(), { ...base, host: '0.0.0.0', insecure: true, auth: { provider: 'none' } })).rejects.toThrow(/FEDREG_PUBLIC_ORIGIN/);
+  });
+});
+
+describe('Host validation (DNS rebinding)', () => {
+  // fetch() cannot set Host (a forbidden header), so use node:http to send exactly what an
+  // attacker's DNS-rebound page would.
+  const raw = async (path: string, headers: Record<string, string>, body?: string) => {
+    const { request } = await import('node:http');
+    const url = new URL(base);
+    return await new Promise<number>((resolve, reject) => {
+      const req = request({ host: url.hostname, port: url.port, path, method: body ? 'POST' : 'GET', headers }, res => { res.resume(); resolve(res.statusCode ?? 0); });
+      req.on('error', reject);
+      req.end(body);
+    });
+  };
+  it('rejects a foreign Host even when Origin matches it, and accepts loopback', async () => {
+    expect(await raw('/health', { host: 'attacker.example' })).toBe(421);
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: meta() } });
+    expect(await raw('/mcp', { host: 'attacker.example', origin: 'http://attacker.example', 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body)).toBe(421);
+    expect(await raw('/health', { host: `127.0.0.1:${new URL(base).port}` })).toBe(200);
   });
 });
 
@@ -469,5 +525,37 @@ describe('per-IP rate limit behind a reverse proxy', () => {
     try {
       expect([await status('203.0.113.1'), await status('203.0.113.2'), await status('203.0.113.3')]).toEqual([200, 200, 429]);
     } finally { await h.close(); }
+  });
+});
+
+describe('Client disconnect cancels the execution', () => {
+  it('frees the execution slot when the HTTP client goes away', async ({ skip }) => {
+    if (!sandboxAvailable) return skip();
+    const h = await startHttp({ ...deps, executionLimiter: new ExecutionLimiter(1, 1) }, {
+      host: '127.0.0.1', port: 0, rps: 1000, burst: 1000, subjectDailyQuota: 1_000_000, insecure: true, auth: { provider: 'none' }, publicOrigin: 'http://127.0.0.1',
+    });
+    const target = `http://127.0.0.1:${h.port}`;
+    const run = (code: string, timeoutMs: number, signal?: AbortSignal) =>
+      rpc('tools/call', { name: 'execute', arguments: { code, timeoutMs } }, { target, ...(signal ? { signal } : {}) });
+    try {
+      const controller = new AbortController();
+      const hanging = run('await new Promise(() => {})', 60_000, controller.signal).catch(() => 'aborted');
+      await new Promise(r => setTimeout(r, 400));
+      // The only slot is taken while the client is connected.
+      const busy = await run('return 1', 5000);
+      expect(JSON.parse((busy.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text)).toMatchObject({ ok: false, error: { name: 'Busy' } });
+      controller.abort();
+      await hanging;
+      // The slot is free again well before the 60 s execution timeout.
+      let next: { ok?: boolean; value?: unknown } | undefined;
+      for (let i = 0; i < 30 && !next?.ok; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        const r = await run('return 7', 5000);
+        next = JSON.parse((r.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text);
+      }
+      expect(next).toMatchObject({ ok: true, value: 7 });
+    } finally {
+      await h.close();
+    }
   });
 });

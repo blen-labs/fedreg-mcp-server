@@ -19,16 +19,34 @@ export class UpstreamGate {
     this.tokens = opts.burst;
   }
 
-  /** Resolves with a release function once the request may start. */
-  acquire(): Promise<() => void> {
+  /**
+   * Resolves with a release function once the request may start. Rejects with AbortError if
+   * `signal` aborts while queued.
+   */
+  acquire(signal?: AbortSignal): Promise<() => void> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const i = this.queue.findIndex(w => w.timer === timer);
+      if (signal?.aborted) return reject(Object.assign(new Error('aborted while waiting for an upstream slot'), { name: 'AbortError' }));
+      const waiter = {
+        resolve: (release: () => void) => { signal?.removeEventListener('abort', onAbort); resolve(release); },
+        reject,
+        timer: setTimeout(() => {
+          remove();
+          reject(new Error(`waited ${this.opts.maxWaitMs}ms for an upstream slot`));
+        }, this.opts.maxWaitMs),
+      };
+      const remove = () => {
+        const i = this.queue.indexOf(waiter);
         if (i >= 0) this.queue.splice(i, 1);
-        reject(new Error(`waited ${this.opts.maxWaitMs}ms for an upstream slot`));
-      }, this.opts.maxWaitMs);
-      timer.unref?.();
-      this.queue.push({ resolve, reject, timer });
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        clearTimeout(waiter.timer);
+        remove();
+        reject(Object.assign(new Error('aborted while waiting for an upstream slot'), { name: 'AbortError' }));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      waiter.timer.unref?.();
+      this.queue.push(waiter);
       this.drain();
     });
   }

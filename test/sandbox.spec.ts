@@ -82,7 +82,8 @@ describe('dynamic binding injection', () => {
   it('deno supervisor never embeds user code or binding names (they arrive by message)', () => {
     expect(SUPERVISOR_SOURCE).not.toMatch(/\bfr\b|ecfr|regs/);
     expect(SUPERVISOR_SOURCE).toContain('crypto.getRandomValues');
-    expect(SUPERVISOR_SOURCE).toContain("'Deno', 'postMessage'");
+    // V8 builds no code from strings in the sandbox process, so the supervisor must not ask it to.
+    expect(SUPERVISOR_SOURCE).not.toContain('new Function');
   });
 
   it('isolate injects bindings as working proxies (gated on availability)', async ({ skip }) => {
@@ -175,8 +176,20 @@ describe('deno runner isolation (gated on availability)', () => {
     const forged = await run("writeFrame({ kind: 'result', ok: true, value: 'forged' }); clearTimeout(timer); while (true) {}", { timeoutMs: 300 });
     expect(forged.ok).toBe(false);
     expect(forged.value).toBeUndefined();
+    // The Function constructor is refused outright (no code generation from strings) ...
     const ambient = await run('const c = "constr" + "uctor"; const F = (async () => {})[c][c]; return F("return [typeof Deno, typeof self.fetch, typeof self.postMessage, typeof self.Worker]")();');
-    expect(ambient).toMatchObject({ ok: true, value: ['undefined', 'undefined', 'undefined', 'undefined'] });
+    expect(ambient).toMatchObject({ ok: false, error: { name: 'EvalError' } });
+    // ... and runtime globals the preflight accepts by name are gone, so the runtime alone decides.
+    const gone = ['self', 'navigator', 'postMessage', 'close', 'crypto', 'Blob', 'Request', 'caches',
+      'setTimeout', 'setImmediate', 'structuredClone', 'performance', 'location'];
+    expect(await run(`return [${gone.map(n => `typeof ${n}`).join(', ')}];`)).toMatchObject({ ok: true, value: gone.map(() => 'undefined') });
+  });
+
+  it('exits when the host goes away, even while user code is still running', async ({ skip }) => {
+    if (!(await runner.available())) return skip();
+    // A host that crashes or is killed closes the supervisor's stdin; a busy Worker and the memory
+    // watchdog must not keep the process alive as an orphan.
+    expect(await superviseThenCloseStdin('while (true) {}')).toBe(true);
   });
 
   it('resolves only after its child process has exited', async ({ skip }) => {
@@ -195,3 +208,27 @@ describe('deno runner isolation (gated on availability)', () => {
     expect(count()).toBe(before);
   });
 });
+
+/** Starts `code` in a bare supervisor, closes its stdin, and reports whether it exits within 3 s. */
+async function superviseThenCloseStdin(code: string): Promise<boolean> {
+  const { spawn } = await import('node:child_process');
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'fedreg-supervisor-test-'));
+  writeFileSync(join(dir, 'supervisor.js'), SUPERVISOR_SOURCE);
+  const child = spawn('deno', ['run', '--no-prompt', '--no-config', '--no-lock', '--no-remote', '--no-npm', '--quiet', join(dir, 'supervisor.js')]);
+  try {
+    const exit = new Promise<boolean>((resolve) => child.on('exit', () => resolve(true)));
+    child.stdout.setEncoding('utf8').once('data', (chunk: string) => {
+      const token = chunk.split('\n')[0]!.replace(/^[A-Z]+-SANDBOX /, '');
+      child.stdin.write(`${token}${JSON.stringify({ t: 'start', code, bindings: [], memoryBytes: 256 * 1024 * 1024, limits: { maxLogBytes: 65536, maxLogLines: 1000, logLineOverhead: 16, logTruncated: '[logs truncated]', maxRpcArgBytes: 65536, maxResultBytes: 262144, maxError: 4000 } })}\n`);
+      // Let the program start, then go away like a crashed host.
+      setTimeout(() => child.stdin.end(), 300);
+    });
+    return await Promise.race([exit, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000))]);
+  } finally {
+    child.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

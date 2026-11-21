@@ -1,6 +1,6 @@
 import type { ExecuteOptions, ExecuteResult, RpcBridge, SandboxRunner } from './types.js';
 import { preflight } from './policy.js';
-import { DEFAULT_LIMITS, LOG_LINE_OVERHEAD, LOG_TRUNCATED, LogSink, MAX_ERROR_MESSAGE, boundMessage, finishValue, policyMessage, resultTooLarge, type SandboxLimits } from './limits.js';
+import { DEFAULT_LIMITS, LOG_LINE_OVERHEAD, LOG_TRUNCATED, LogSink, MAX_ERROR_MESSAGE, boundMessage, checkRpcArgs, finishValue, memoryLimitExceeded, policyMessage, resultTooLarge, type SandboxLimits } from './limits.js';
 
 type Ivm = any; // isolated-vm ships its own types, but it is an optional native dependency.
 
@@ -13,7 +13,7 @@ async function loadIvm(): Promise<Ivm> {
 
 /**
  * isolated-vm sandbox: a fresh V8 isolate per execution with a heap cap. The host owns a
- * wall-clock deadline that starts before setup: when it fires the isolate
+ * wall-clock deadline that starts before setup: when it fires (or the caller aborts) the isolate
  * is disposed, which stops running code and rejects anything it awaits, and the execution settles
  * once. V8's own `timeout` stays as a second guard for synchronous loops. This runs in the server
  * process, so for hosted multi-user execution prefer the Deno runner (separate process).
@@ -48,13 +48,17 @@ export class IsolateRunner implements SandboxRunner {
     }
 
     const ivm = await loadIvm();
-    const isolate = new ivm.Isolate({ memoryLimit: Math.max(16, opts.memoryMb ?? 64) });
+    const memoryMb = Math.max(16, opts.memoryMb ?? 64);
+    const isolate = new ivm.Isolate({ memoryLimit: memoryMb });
     let disposed = false;
     const dispose = () => { if (!disposed) { disposed = true; try { isolate.dispose(); } catch { /* ignore */ } } };
 
     let stop!: (r: Omit<ExecuteResult, 'durationMs' | 'logs'>) => void;
     const stopped = new Promise<Omit<ExecuteResult, 'durationMs' | 'logs'>>(resolve => { stop = resolve; });
     const deadline = setTimeout(() => stop({ ok: false, error: { name: 'TimeoutError', message: `Execution exceeded ${timeoutMs}ms` } }), timeoutMs);
+    const onAbort = () => stop({ ok: false, error: { name: 'AbortError', message: 'Execution was cancelled.' } });
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    if (opts.signal?.aborted) onAbort();
 
     const run = async (): Promise<Omit<ExecuteResult, 'durationMs' | 'logs'>> => {
       const context = await isolate.createContext();
@@ -113,9 +117,14 @@ export class IsolateRunner implements SandboxRunner {
         if (typeof argsJson !== 'string' || Buffer.byteLength(argsJson, 'utf8') > limits.maxRpcArgBytes) return fail('ArgumentsTooLarge', `SDK call arguments exceed ${limits.maxRpcArgBytes} bytes.`);
         let args: unknown[];
         try { args = JSON.parse(argsJson) as unknown[]; } catch { return fail('TypeError', 'SDK arguments must be JSON-serializable.'); }
+        const tooBig = checkRpcArgs(args, limits);
+        if (tooBig) return fail(tooBig.name, tooBig.message);
         pending++;
         try {
-          const result = await rpc.dispatch({ binding, path, args });
+          let result: Awaited<ReturnType<RpcBridge['dispatch']>>;
+          // The bridge reports a failed call as a result. If it rejects instead, the program gets an error.
+          try { result = await rpc.dispatch({ binding, path, args }, { signal: opts.signal }); }
+          catch { return fail('Error', 'The SDK call failed.'); }
           return new ivm.ExternalCopy(result).copyInto();
         } finally {
           pending--;
@@ -155,6 +164,9 @@ export class IsolateRunner implements SandboxRunner {
       if (typeof tagged !== 'string' || !tagged.startsWith('E')) return { ok: false, error: { name: 'SandboxProtocolError', message: 'The sandbox returned an invalid result.' } };
       let e: { name?: unknown; message?: unknown; status?: unknown };
       try { e = JSON.parse(tagged.slice(1)) as typeof e; } catch { e = { name: 'Error', message: 'The sandbox returned an unreadable error.' }; }
+      // Buffers count against the isolate's memory limit, and V8 refuses one over it with this
+      // error. Left uncaught, it ended the program for lack of memory, as in the Deno runner.
+      if (e.name === 'RangeError' && e.message === 'Array buffer allocation failed') return { ok: false, error: memoryLimitExceeded(memoryMb) };
       return { ok: false, error: { name: String(e.name ?? 'Error').slice(0, 100), message: boundMessage(String(e.message ?? '')), ...(typeof e.status === 'number' ? { status: e.status } : {}) } };
     };
 
@@ -162,7 +174,16 @@ export class IsolateRunner implements SandboxRunner {
       const outcome = await Promise.race([
         run().catch((err: unknown) => {
           const e = err as { name?: string; message?: string; status?: unknown };
-          if (disposed) return { ok: false, error: { name: 'TimeoutError', message: `Execution exceeded ${timeoutMs}ms` } };
+          // A program can make an error of its own reach this handler, with any text it likes
+          // (a throwing Promise[Symbol.species] getter does it). So the outcomes below are
+          // decided by state, never by the message.
+          const timedOut = { ok: false, error: { name: 'TimeoutError', message: `Execution exceeded ${timeoutMs}ms` } };
+          if (disposed) return timedOut;
+          // Disposed, and not by this runner: isolated-vm does that at the heap limit.
+          if (isolate.isDisposed) return { ok: false, error: memoryLimitExceeded(memoryMb) };
+          // isolated-vm's own timer ends a CPU loop, and on a busy host it reports before the
+          // deadline timer above: the clock says the program ran out of time either way.
+          if (Date.now() - started >= timeoutMs) return timedOut;
           return { ok: false, error: { name: String(e?.name ?? 'Error').slice(0, 100), message: boundMessage(String(e?.message ?? err)), ...(typeof e?.status === 'number' ? { status: e.status } : {}) } };
         }),
         stopped,
@@ -170,6 +191,7 @@ export class IsolateRunner implements SandboxRunner {
       return done(outcome);
     } finally {
       clearTimeout(deadline);
+      opts.signal?.removeEventListener('abort', onAbort);
       dispose();
     }
   }

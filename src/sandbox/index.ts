@@ -25,20 +25,29 @@ export class UnavailableRunner implements SandboxRunner {
   }
 }
 
-export async function pickSandbox(preferred: SandboxKind): Promise<SandboxRunner> {
+/**
+ * `auto` prefers isolated-vm (in-process, fastest) for single-user use (stdio, --insecure local).
+ * With `processIsolation` (authenticated, multi-user HTTP serving) only the Deno runner is allowed:
+ * user code must run in a separate, killable, permissionless process. There it never falls back
+ * to the in-process runner; without Deno, `execute` is unavailable and says why.
+ */
+export async function pickSandbox(preferred: SandboxKind, opts: { processIsolation?: boolean } = {}): Promise<SandboxRunner> {
+  if (opts.processIsolation && preferred === 'isolate') {
+    throw new Error('--sandbox isolate runs user code inside the server process and is not allowed for authenticated multi-user HTTP serving. Use --sandbox deno (or auto) and install Deno.');
+  }
   if (preferred === 'isolate') {
     const r = new IsolateRunner();
     if (await r.available()) return r;
-    return new UnavailableRunner('isolated-vm is not installed on this platform; install it or run with --sandbox deno');
+    return new UnavailableRunner('isolated-vm is not available on this platform (it ships prebuilt binaries for Node 24 and 26 on macOS arm64, Linux x64/arm64 and Windows x64); run with --sandbox deno instead');
   }
-  if (preferred === 'deno') {
-    const r = new DenoRunner();
-    if (await r.available()) return r;
-    return new UnavailableRunner('Deno is not available on PATH; install Deno or run with --sandbox isolate');
+  const deno = new DenoRunner();
+  if (preferred === 'deno' || opts.processIsolation) {
+    if (await deno.available()) return deno;
+    return new UnavailableRunner(opts.processIsolation
+      ? 'Multi-user HTTP serving runs code only in the Deno sandbox, and Deno is not on PATH. Install Deno (https://deno.com). search_api and describe_schema still work.'
+      : 'Deno is not available on PATH; install Deno or run with --sandbox isolate');
   }
   const iso = new IsolateRunner();
-  if (await iso.available()) return iso;
-  const deno = new DenoRunner();
-  if (await deno.available()) return deno;
-  return new UnavailableRunner('No sandbox runner available. Install isolated-vm or Deno to use the `execute` tool. search_api and describe_schema still work.');
+  for (const r of [iso, deno]) if (await r.available()) return r;
+  return new UnavailableRunner('No sandbox runner available. Use Node 24/26 on a platform with isolated-vm prebuilds, or install Deno, to use the `execute` tool. search_api and describe_schema still work.');
 }
