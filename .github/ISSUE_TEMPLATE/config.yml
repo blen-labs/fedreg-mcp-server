@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new
+    about: Sandbox escapes, authentication bypasses and key leaks go to a private advisory, never a public issue.
+  - name: Documentation
+    url: https://fedreg.mcp.blenlabs.com/docs/
+    about: Connect guides, key setup, recipes and the SDK reference. Check here before you open an issue.
+  - name: regulations.gov API key problems
+    url: https://fedreg.mcp.blenlabs.com/docs/keys/
+    about: The key comes from api.data.gov, not this project. This page says how to get one and what its limit is.

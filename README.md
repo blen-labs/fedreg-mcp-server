@@ -1,48 +1,74 @@
-# Federal Regulations MCP Server
+# Federal Regulations MCP
 
 [![CI](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/blen-labs/fedreg-mcp-server/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@blen/fedreg-mcp-server.svg)](https://www.npmjs.com/package/@blen/fedreg-mcp-server)
 [![license: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520.19-339933.svg)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/node-24%20%7C%2026-339933.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-7c3aed.svg)](https://modelcontextprotocol.io/specification/2026-07-28)
 
 <p align="center">
   <video src="https://github.com/blen-labs/fedreg-mcp-server/raw/main/media/fedreg-launch.mp4" poster="https://raw.githubusercontent.com/blen-labs/fedreg-mcp-server/main/media/launch-poster.png" controls muted playsinline width="760"></video>
 </p>
 
-**Ask your AI assistant real questions about U.S. federal regulations — and get answers grounded in the official Federal Register, eCFR, and regulations.gov.**
+**Ask your AI assistant real questions about U.S. federal regulations — and get answers grounded in the official Federal Register, eCFR and regulations.gov.**
+
+**Documentation:** [fedreg.mcp.blenlabs.com/docs](https://fedreg.mcp.blenlabs.com/docs/) has connect buttons for Claude Desktop, Cursor and VS Code, key setup, recipes, and the SDK reference.
 
 This is a [Model Context Protocol](https://modelcontextprotocol.io) server that connects any MCP client (Claude Desktop and others) to three official U.S. government sources:
 
-- **[Federal Register](https://www.federalregister.gov)** — the daily journal of the federal government: rules, proposed rules, notices, and presidential documents since 1994.
-- **[Electronic Code of Federal Regulations (eCFR)](https://www.ecfr.gov)** — the current, continuously updated text of the Code of Federal Regulations.
-- **[regulations.gov](https://www.regulations.gov)** — public comments, dockets, and live comment-period status for federal rulemakings.
+- **[Federal Register](https://www.federalregister.gov)** — the daily journal of the federal government: rules, proposed rules, notices, presidential documents and public inspection documents since 1994.
+- **[Electronic Code of Federal Regulations (eCFR)](https://www.ecfr.gov)** — the current, continuously updated text of the Code of Federal Regulations, its structure and its history.
+- **[regulations.gov](https://www.regulations.gov)** — public comments, dockets and live comment-period status for federal rulemakings.
 
 Instead of bolting on dozens of rigid, narrow tools, it hands the model a small, well-documented SDK and lets it write the exact query it needs in JavaScript — then runs that code in a locked-down sandbox. This is the **code-mode** pattern, and it makes wide government APIs usable without overwhelming the model with tool definitions.
 
 > Independent open-source project. It calls public U.S. government APIs and is not affiliated with or endorsed by the U.S. government.
 
-## Personal accounts and regulations.gov keys
+## API keys
 
-Hosted operators can enable `FEDREG_AUTH_PROVIDER=accounts` for Google sign-in,
-a personal API-key page at `/account`, and OAuth/PKCE connections from MCP clients.
-The interface matches the SAM.gov server: Google sign-in, a Connect key-entry step,
-a separate Authorize screen, and account controls with the shared BLEN styling.
-Keys are encrypted in PostgreSQL and selected from each caller's verified account.
-Signed-in clients connect `/mcp/account`; `/mcp` keeps serving Federal Register and
-eCFR with no sign-in (and regulations.gov through `FEDREG_REGS_API_KEY`, if set). Stdio retains its existing
-`FEDREG_REGS_API_KEY` configuration. See [account setup](docs/accounts.md) for
-required secrets, Google callback configuration, testing, and rollout steps.
+Only regulations.gov needs a key. It is free, and it is yours alone: do not share it. The key is held host-side and never reaches the sandbox.
+
+| Source | Key | How to get it | Env var |
+|---|---|---|---|
+| `fr` | None | — | — |
+| `ecfr` | None | — | — |
+| `regs` | A free api.data.gov key | Sign up in the **Getting Started** section of the [regulations.gov API page](https://open.gsa.gov/api/regulationsgov/) | `FEDREG_REGS_API_KEY` |
+
+api.data.gov applies a default limit of 1,000 requests per hour to each key. Without a key, `regs` is **disabled**: its global still exists in the sandbox, but calls return a `SourceUnavailable` error that says how to get one, while `fr` and `ecfr` keep working.
+
+## Quickstart (Claude Desktop)
+
+Add the server to your Claude Desktop config (**Settings → Developer → Edit Config**):
+
+```json
+{
+  "mcpServers": {
+    "fedreg": {
+      "command": "npx",
+      "args": ["-y", "@blen/fedreg-mcp-server"],
+      "env": {
+        "FEDREG_REGS_API_KEY": "your-regulations-gov-key"
+      }
+    }
+  }
+}
+```
+
+The `env` block is optional: leave it out to use only the Federal Register and the eCFR. Restart Claude Desktop, then ask in plain language:
+
+> *"Find EPA methane rules published since 2024."*
+> *"What does 40 CFR Part 60 cover?"*
+> *"Which proposed rules opened for public comment this week?"*
+
+Requires **Node.js 24 or 26** (LTS). `npx` downloads and runs the server on demand. If `execute` reports `SandboxUnavailable`, see [Sandbox runtimes](#sandbox-runtimes). A Claude Desktop extension bundle (`.mcpb`) that asks for the key at install time is attached to each [GitHub release](https://github.com/blen-labs/fedreg-mcp-server/releases) and built from this repository (`pnpm mcpb:prepare && pnpm mcpb:pack`).
 
 ## See it in action
 
-Ask Claude:
-
 > *"What does 50 CFR 21.150 cover, and have there been recent Federal Register rules touching migratory-bird depredation?"*
 
-The model finds the right calls and runs them in the sandbox — no hand-written tool per endpoint:
+The model finds the right calls with `search_api` and runs them in the sandbox — no hand-written tool per endpoint:
 
-```ts
+```js
 // Pull the current text of an eCFR section…
 const { titles } = await ecfr.titles.list();
 const date = titles.find(t => t.number === 50).latest_issue_date;
@@ -59,78 +85,20 @@ const rules = await fr.documents.search({
 
 …then answers in plain English, citing the section and the rules it found.
 
-## Features
+## What's covered
 
-- **Three official sources, one server** — the full Federal Register v1 (`fr.*`), eCFR (`ecfr.*`), and regulations.gov v4 (`regs.*`) APIs behind one server.
-- **Code mode, not tool sprawl** — the model writes JavaScript against the `fr` / `ecfr` / `regs` SDKs instead of juggling dozens of single-purpose tools.
-- **Safe by construction** — user code runs in an `isolated-vm` (or Deno) sandbox with **no network, filesystem, env, or subprocess access**. The only way out is to the three upstream government APIs.
-- **Runs anywhere MCP does** — stdio for Claude Desktop, or a remote Streamable HTTP server with OAuth, rate limiting, and quotas.
-- **Discovery built in** — `search_api` and `describe_schema` help the model (and you) find the right call fast.
-
-## Which source for what
-
-| Need | Source |
+| Need | Call |
 |---|---|
-| Daily rules, proposed rules, notices; FR document metadata since 1994 | `fr` |
-| Current Code of Federal Regulations text | `ecfr` |
-| Public comments, dockets, live comment-period status | `regs` |
+| Rules, proposed rules, notices and presidential documents since 1994 | `fr.documents.search` / `get` / `getMany` |
+| Documents on public inspection, before they are published | `fr.publicInspection.*` |
+| Agencies, issues, suggested searches, images | `fr.agencies.*`, `fr.issues.*`, `fr.suggestedSearches.*`, `fr.images.*` |
+| The current text of the Code of Federal Regulations, and its structure | `ecfr.full`, `ecfr.titles.*` and the versioned structure and content calls |
+| eCFR search, with counts per agency or title | `ecfr.search.*` |
+| Dockets, documents and public comments on regulations.gov | `regs.dockets.*`, `regs.documents.*`, `regs.comments.*` |
 
-For canonical Federal Register rule text and metadata since 1994, prefer `fr.documents` — regulations.gov documents overlap it. Reach for `regs` when you need what only it has: public **comments**, **dockets**, and live comment-period status.
+For canonical Federal Register rule text and metadata since 1994, prefer `fr.documents`: regulations.gov documents overlap it. Reach for `regs` when you need what only it has: public **comments**, **dockets** and live comment-period status. `frDocNum` is a *returned* attribute of regs documents, not a filter, so bridge from the Federal Register to regulations.gov by passing the document number as a `searchTerm`; [`examples/regs-comments.js`](./examples/regs-comments.js) shows the whole bridge.
 
-### regulations.gov API key
-
-regulations.gov requires a free API key from [api.data.gov / open.gsa.gov](https://open.gsa.gov/api/regulationsgov/). Set it via `FEDREG_REGS_API_KEY`. The key is held host-side and never reaches the sandbox.
-
-Without a key the `regs` source is **disabled** — `regs.*` calls return a clear `SourceUnavailable` error, while `fr` and `ecfr` keep working normally.
-
-Because the regulations.gov key is shared, `regs` upstream calls are bounded by a process-wide hourly bucket (`FEDREG_REGS_RATE_PER_HOUR`), a per-subject hourly quota in HTTP mode (`FEDREG_REGS_SUBJECT_RATE_PER_HOUR`; under `--insecure` all callers share the single `anonymous` bucket, and stdio skips it), and a per-`execute()` call budget (`FEDREG_REGS_MAX_CALLS_PER_EXECUTE`). For the two hourly rates, `0` is **not** "unlimited" — it blocks all regs calls; to disable regs entirely, leave `FEDREG_REGS_API_KEY` unset.
-
-### Bridge example: comments on a Federal Register rule
-
-`frDocNum` is a *returned* attribute on regs documents, not a filter — so bridge from FR to regulations.gov via the document number as a `searchTerm`:
-
-```ts
-// 1. Find the rule in the Federal Register and read its document number.
-const fr1 = await fr.documents.search({
-  conditions: { term: 'methane', type: ['RULE'] },
-  per_page: 1,
-  order: 'newest',
-});
-const docNum = fr1.results[0].document_number;
-
-// 2. Look it up on regulations.gov by document number, then read its objectId.
-const rd = await regs.documents.search({ filter: { searchTerm: docNum } });
-const objectId = rd.data[0].attributes.objectId;
-
-// 3. Pull the public comments filed on that document.
-const comments = await regs.comments.search({
-  filter: { commentOnId: objectId },
-  page: { size: 250 },
-});
-```
-
-## Quickstart (Claude Desktop)
-
-Add the server to your Claude Desktop config (**Settings → Developer → Edit Config**):
-
-```json
-{
-  "mcpServers": {
-    "fedreg": {
-      "command": "npx",
-      "args": ["-y", "@blen/fedreg-mcp-server"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop, then just ask in plain language:
-
-> *"Find EPA methane rules published since 2024."*
-> *"What does 40 CFR Part 60 cover?"*
-> *"Which proposed rules opened for public comment this week?"*
-
-Requires **Node.js ≥ 20.19**. `npx` downloads and runs the server on demand; no global install needed. If the `execute` tool reports `SandboxUnavailable`, see [Sandbox runtimes](#sandbox-runtimes).
+Full surface: [`docs/sdk-reference.md`](./docs/sdk-reference.md).
 
 ## How it works
 
@@ -138,46 +106,60 @@ Three tools, in the order the model uses them:
 
 | Tool | What it does |
 |---|---|
-| `search_api(query, k?)` | Finds the right endpoint/field via BM25 over the SDK docs. Returns signatures and ready-to-run JavaScript snippets. |
-| `describe_schema({ path? \| prefix? })` | Looks up an exact call or lists a whole namespace. |
-| `execute({ code, timeoutMs?, memoryMb? })` | Runs JavaScript (no type annotations; top-level `await`/`return` allowed) in the sandbox, with `fr`, `ecfr`, and `regs` as globals. (`regs` is always defined; without `FEDREG_REGS_API_KEY` its calls return a `SourceUnavailable` error rather than a `ReferenceError`.) |
+| `search_api(query, k?)` | BM25 over the SDK method docs and a response-field dictionary. Returns signatures and ready-to-run JavaScript. |
+| `describe_schema({ path? \| prefix? })` | Looks up an exact entry (`fr.documents.search`) or lists a namespace (`regs.`). |
+| `execute({ code, timeoutMs?, memoryMb? })` | Runs JavaScript (no type annotations; top-level `await`/`return` allowed) in the sandbox with `fr`, `ecfr` and `regs` as globals. `timeoutMs` defaults to 15 s (max 60 s). |
 
-All three tools carry MCP annotations marking them read-only and non-destructive (`execute` is additionally `openWorldHint: true`, since it reaches the upstream APIs), so clients that honor annotations can auto-approve them.
-
-A request flows from the MCP client through `execute` into the sandbox; the `fr.*` / `ecfr.*` / `regs.*` globals are thin proxies that marshal each call across a host-side RPC bridge to the real APIs:
+All three are annotated read-only and non-destructive (`execute` is also `openWorldHint: true`) and publish an `outputSchema`. Results come back as compact JSON text plus the same object as `structuredContent`. A failed execution (thrown error, timeout, limit) is returned with `isError: true` and the full envelope — `{ ok: false, error: { name, message, status? }, logs, durationMs }` — so the model sees what went wrong.
 
 ```text
-MCP client → execute(code) → sandbox → fr.* / ecfr.* / regs.* RPC bridge → upstream APIs
+MCP client → execute(code) → sandbox → fr.* / ecfr.* / regs.* RPC bridge → host HttpClient (key, gate, cache) → federalregister.gov / ecfr.gov / api.regulations.gov
 ```
 
-Full SDK surface: [`docs/sdk-reference.md`](./docs/sdk-reference.md) · Architecture: [`docs/architecture.md`](./docs/architecture.md) · Paste-ready examples: [`examples/`](./examples/).
+Architecture: [`docs/architecture.md`](./docs/architecture.md) · Paste-ready examples: [`examples/`](./examples/).
+
+### Rate limits and guardrails
+
+The Federal Register and the eCFR see every user of a server as one client, and regulations.gov limits each key. So the server:
+
+- shares one gate per public API (Federal Register, eCFR) across all users: 8 requests in flight and 10 started per second, and a call that waits more than 15 s for a slot fails with `RateLimited`;
+- on a `429` from the Federal Register or eCFR, pauses every caller of that API and retries the call once after the `Retry-After` (at most 5 s); a `429` from regulations.gov is returned at once (`RateLimited`), never retried;
+- caps upstream calls per `execute()`: 100 for the Federal Register and the eCFR together (`CallBudgetExceeded`), 30 for regulations.gov (`RegsCallBudgetExceeded`);
+- keeps regulations.gov below the key's limit: 1,000 calls per hour for the whole process (`RegsRateLimited` beyond) and 500 per hour for each authenticated subject (one shared `anonymous` subject under `--insecure`; stdio has no subject, so it skips that one);
+- caches responses for 5 minutes, so repeated questions do not spend quota;
+- rejects results over 8 MiB returned from `execute` (`ResultTooLarge`): use `fields` and `per_page` to keep records small.
+
+These guardrails are in memory, so run **one replica**; with more, divide the hourly rates by the replica count.
+
+## Personal accounts (hosted mode)
+
+`FEDREG_AUTH_PROVIDER=accounts` adds Google sign-in, an `/account` page where each user saves their own regulations.gov key (checked against regulations.gov, encrypted in PostgreSQL, never shown again), and OAuth/PKCE connections at `/mcp/account`. Each signed-in user's regulations.gov calls use only that user's own key. The anonymous `/mcp` endpoint needs no sign-in and serves the Federal Register and the eCFR, and regulations.gov only through the operator's `FEDREG_REGS_API_KEY`, if one is set. See [docs/accounts.md](docs/accounts.md).
 
 ## Sandbox runtimes
 
-`execute` needs a sandbox runner. The server picks one automatically:
+`execute` needs a sandbox runner:
 
-1. **`isolated-vm`** (preferred) — a fresh V8 isolate. Built automatically during install on Linux/macOS/Windows (x64/arm64) where a C++ toolchain is present.
-2. **Deno** (fallback) — used when `isolated-vm` isn't available and `deno` is on `PATH`.
-3. If neither is available, `search_api` and `describe_schema` still work; `execute` returns `SandboxUnavailable`.
+1. **`isolated-vm`** — a fresh V8 isolate per execution, with a heap cap and a host-enforced deadline. `isolated-vm` 7 ships prebuilt binaries for Node 24 and 26, so no compiler is needed. Preferred for single-user use (stdio, `--insecure` local HTTP).
+2. **Deno** — user code runs in a separate `deno` process with no permissions (no network, files, env or subprocesses), inside a Worker stripped of `Deno`, `fetch` and messaging globals; the server owns the deadline and kills the process group. Install [Deno](https://docs.deno.com/runtime/getting_started/installation/) and it is used when `isolated-vm` is unavailable, or always with `--sandbox deno` (`FEDREG_SANDBOX=deno`).
+3. **Authenticated HTTP serving** (OIDC or accounts) runs user code **only** in the Deno runner — a separate, killable process per execution. `--sandbox isolate` is refused there, and without Deno, `execute` reports `SandboxUnavailable` instead of falling back to in-process execution.
+4. If no runner is available, `search_api` and `describe_schema` still work; `execute` returns `SandboxUnavailable`.
 
-> On very new Node majors, `isolated-vm` may not have a compatible prebuild yet. Install [Deno](https://docs.deno.com/runtime/getting_started/installation/) and run with `--sandbox deno` (or `FEDREG_SANDBOX=deno`). Node 20 and 22 build `isolated-vm` cleanly.
+Every execution is bounded: code 256 KiB, returned value 8 MiB (`ResultTooLarge`), logs 1 MiB / 10,000 lines, SDK-call arguments 1 MiB, 100 calls pending at once. At most 8 executions run at once per server and 2 per authenticated subject (`FEDREG_MAX_CONCURRENT_EXECUTIONS`, `FEDREG_MAX_EXECUTIONS_PER_SUBJECT`); a client that cancels or disconnects stops its execution and any upstream calls in flight.
 
 ## Self-hosting (remote HTTP)
 
-Run a shared, authenticated endpoint over Streamable HTTP:
-
 ```bash
-# Dev only — no auth, loopback-bound:
-npx @blen/fedreg-mcp-server --http --insecure --host 127.0.0.1 --port 8080
+# Local, single user, no auth (binds 127.0.0.1 unless HOST/--host says otherwise):
+FEDREG_REGS_API_KEY=... npx @blen/fedreg-mcp-server --http --insecure --port 8080
 
-# Production — auth via any OIDC issuer (issuer, audience and https JWKS URL are required;
-# execute runs only in the Deno sandbox, so Deno must be on PATH — the Docker image ships it):
+# Your own server, authenticated via an OIDC issuer (your regulations.gov key serves every
+# token holder). Issuer, audience and an https JWKS URL are all required; Deno must be installed.
+FEDREG_REGS_API_KEY=... \
 FEDREG_AUTH_PROVIDER=clerk \
 FEDREG_AUTH_ISSUER=https://<tenant>.clerk.accounts.dev \
 FEDREG_AUTH_AUDIENCE=https://your-host.example.com/mcp \
 FEDREG_AUTH_JWKS_URL=https://<tenant>.clerk.accounts.dev/.well-known/jwks.json \
 FEDREG_PUBLIC_ORIGIN=https://your-host.example.com \
-FEDREG_ALLOWED_HOSTS=your-host.example.com \
   npx @blen/fedreg-mcp-server --http
 ```
 
@@ -187,42 +169,57 @@ Then point any MCP client at it:
 { "mcpServers": { "fedreg": { "type": "http", "url": "https://your-host.example.com/mcp" } } }
 ```
 
-The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id`, so requests can be load-balanced across replicas without sticky routing. Pre-2026 clients are still served through a stateless legacy fallback. It adds OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting, per-subject daily quotas, Host-header allowlisting, and Origin validation on `/mcp` (browser cross-origin requests are rejected unless allowlisted via `FEDREG_ALLOWED_ORIGINS`; non-browser clients are unaffected). A step-by-step Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the bundled [`Dockerfile`](./deploy/Dockerfile) precompiles `isolated-vm` and slims to a ~220 MB `node:22-bookworm-slim` runtime.
+The HTTP transport implements the stateless MCP `2026-07-28` Streamable HTTP profile — no `initialize` handshake and no `Mcp-Session-Id` — with a stateless legacy fallback for pre-2026 clients. It fails closed:
+
+- `--http` without `--insecure` refuses to start unless real authentication is configured (an OIDC provider, or `accounts`). OIDC tokens must carry the configured issuer and audience, an expiry and a subject, use an asymmetric algorithm, and hold every scope in `FEDREG_AUTH_SCOPES` (otherwise `403 insufficient_scope`).
+- Listening on anything but loopback requires `FEDREG_PUBLIC_ORIGIN` or `FEDREG_ALLOWED_HOSTS`: every request's `Host` must match the configured names (DNS-rebinding protection); the trusted origin is never taken from the request. Browser `Origin`s other than the server's own, loopback, or `FEDREG_ALLOWED_ORIGINS` get `403`.
+- Request bodies are capped at 1 MiB.
+
+It also serves OAuth 2.0 Protected Resource Metadata (RFC 9728), per-IP rate limiting and per-subject daily quotas. A Railway walkthrough is in [`deploy/RAILWAY.md`](./deploy/RAILWAY.md); the [`Dockerfile`](./deploy/Dockerfile) runs on Node 26 (LTS) with Deno included.
 
 ### Configuration
 
-The most common knobs (full list and defaults in [`.env.example`](./.env.example)):
+The knobs below are every environment variable the server reads at startup (defaults and notes also in [`.env.example`](./.env.example); `FEDREG_LOG_LEVEL`, `debug` | `info` | `warn` | `error`, sets the log level; account mode reads more, see [docs/accounts.md](docs/accounts.md)):
 
 | Variable | Default | Notes |
 |---|---|---|
+| `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP listener (`--port`, `--host`). `--insecure` binds `127.0.0.1` unless a host is given. |
 | `FEDREG_SANDBOX` | `auto` | `auto` / `isolate` / `deno` |
-| `FEDREG_USER_AGENT` | `fedreg-mcp-server/2.0 …` | Identify yourself, per FR/eCFR etiquette. |
-| `FEDREG_REGS_API_KEY` | — | Free key from regulations.gov / api.data.gov. Unset ⇒ `regs` disabled (fr/ecfr unaffected). |
+| `FEDREG_FR_BASE_URL` | `https://www.federalregister.gov/api/v1` | Federal Register API base URL. |
+| `FEDREG_ECFR_BASE_URL` | `https://www.ecfr.gov/api` | eCFR API base URL. |
 | `FEDREG_REGS_BASE_URL` | `https://api.regulations.gov` | regulations.gov v4 API base URL. |
-| `FEDREG_REGS_MAX_CALLS_PER_EXECUTE` | `30` | Caps regulations.gov upstream calls per `execute()` run (rate-limit guardrail). |
-| `FEDREG_UPSTREAM_CONCURRENCY` | `8` | Federal Register / eCFR requests in flight, per API, shared by all users. |
-| `FEDREG_UPSTREAM_RATE_PER_SEC` | `10` | Federal Register / eCFR requests started per second, per API, shared by all users. |
-| `FEDREG_UPSTREAM_MAX_WAIT_MS` | `15000` | Longest a call waits for a slot before failing with `RateLimited`. |
-| `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` | `100` | Caps Federal Register + eCFR calls per `execute()` run (`CallBudgetExceeded`). |
-| `FEDREG_MAX_CONCURRENT_EXECUTIONS` | `8` | Executions running at once across the server; beyond it `execute` returns `Busy` immediately. |
-| `FEDREG_MAX_EXECUTIONS_PER_SUBJECT` | `2` | Executions one authenticated subject may run at once (`Busy` beyond; not applied on stdio). |
-| `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide cap on regs upstream calls/hour (protects the shared key). In-memory; with N replicas, divide by N. Must be ≥ 1. |
-| `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per-subject regs calls/hour (HTTP mode only; skipped on stdio; one shared `anonymous` bucket under `--insecure`). Must be ≥ 1. |
-| `FEDREG_AUTH_PROVIDER` | `none` | `none` (stdio, or HTTP with `--insecure`) / `generic-oidc` / `clerk` / `workos` / `auth0` / `accounts`. Unknown values stop startup. |
-| `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (used in OAuth metadata). |
+| `FEDREG_REGS_API_KEY` | — | Free key from regulations.gov / api.data.gov. Unset ⇒ `regs` disabled (`fr` and `ecfr` unaffected). In account mode it serves only the anonymous `/mcp` endpoint. |
+| `FEDREG_USER_AGENT` | `fedreg-mcp-server/2.0 (+https://github.com/blen-labs/fedreg-mcp-server)` | Identify your deployment to the upstream APIs. |
+| `FEDREG_UPSTREAM_TIMEOUT_MS` | `20000` | Timeout of one upstream request. |
+| `FEDREG_UPSTREAM_RETRIES` | `3` | Retries for network errors and 5xx. |
+| `FEDREG_UPSTREAM_CONCURRENCY` | `8` | Federal Register / eCFR requests in flight, per API, shared by all users. Must be ≥ 1. |
+| `FEDREG_UPSTREAM_RATE_PER_SEC` | `10` | Federal Register / eCFR requests started per second, per API. Must be ≥ 1. |
+| `FEDREG_UPSTREAM_MAX_WAIT_MS` | `15000` | Longest a call waits for a slot before failing with `RateLimited`. Must be ≥ 1. |
+| `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` | `100` | Federal Register + eCFR calls per `execute()` (`CallBudgetExceeded`). Must be ≥ 1. |
+| `FEDREG_REGS_MAX_CALLS_PER_EXECUTE` | `30` | regulations.gov calls per `execute()` (`RegsCallBudgetExceeded`). `0` blocks every regs call. |
+| `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide hourly cap on regs upstream calls (protects the shared key). Must be ≥ 1. `0` is not "unlimited"; unset the key to disable regs. |
+| `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per authenticated subject per hour (HTTP only; not applied in account mode, which limits per account in PostgreSQL). Must be ≥ 1. |
+| `FEDREG_CACHE_TTL_MS` / `FEDREG_CACHE_MAX_ITEMS` | `300000` / `2000` | Response cache. |
+| `FEDREG_MAX_CONCURRENT_EXECUTIONS` / `FEDREG_MAX_EXECUTIONS_PER_SUBJECT` | `8` / `2` | Simultaneous executions per server / per authenticated subject (`Busy` beyond). Must be ≥ 1. |
+| `FEDREG_AUTH_PROVIDER` | `none` | `none` (stdio, or HTTP with `--insecure`) / `generic-oidc` / `clerk` / `workos` / `auth0` / `accounts`. Unknown values stop startup. The OIDC providers serve every token holder with this server's own regulations.gov key, so use them only for yourself; to host for other people use `accounts`, where each user brings their own key. |
+| `FEDREG_AUTH_ISSUER` / `FEDREG_AUTH_AUDIENCE` / `FEDREG_AUTH_JWKS_URL` | — | Required for OIDC providers (JWKS over https; http only on loopback). |
+| `FEDREG_AUTH_SCOPES` | — | Comma-separated scopes every token must carry. |
+| `FEDREG_PUBLIC_ORIGIN` | — | Public origin clients reach (OAuth metadata, trusted Host). Required for non-loopback HTTP unless `FEDREG_ALLOWED_HOSTS` is set. |
+| `FEDREG_ALLOWED_HOSTS` | — | Extra accepted `Host` values (comma-separated). |
+| `FEDREG_ALLOWED_ORIGINS` | — | Extra browser `Origin`s allowed on `/mcp` (comma-separated exact origins). |
 | `FEDREG_IP_RPS` / `FEDREG_IP_BURST` | `5` / `20` | Per-IP token bucket on the HTTP transport. |
-| `FEDREG_CLIENT_IP_HEADER` | unset | Header your reverse proxy overwrites with the client address (Railway: `x-real-ip`). Required behind a proxy for the per-IP limit to see real clients. |
+| `FEDREG_CLIENT_IP_HEADER` | unset | Header your proxy overwrites with the client address (Railway: `x-real-ip`). |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |
 
 CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--help`.
 
 ## Security
 
-User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a host-owned wall-clock timeout, a heap cap, and byte budgets on logs and results. The full threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new) rather than a public issue.
+User code is sandboxed by design — no network, filesystem, env, or subprocess access, an `acorn` AST preflight, a host-enforced wall-clock deadline, byte budgets, and a V8 heap cap. The regulations.gov key stays in the host process and never appears on the objects the sandbox can see. The threat model is in [`SECURITY.md`](./SECURITY.md). Found a sandbox escape or auth bypass? Please open a [private Security Advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new) rather than a public issue.
 
 ## Contributing
 
-Contributions are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the dev setup and ground rules, and please open an issue before anything non-trivial. By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the dev setup and ground rules, and please open an issue before anything non-trivial. For questions and help, see [`SUPPORT.md`](./SUPPORT.md). By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## License
 
@@ -237,14 +234,10 @@ are responsible for their own policies.
 
 ## Acknowledgements
 
-- The U.S. Government Publishing Office and the National Archives for publishing the Federal Register and eCFR APIs.
+- The U.S. Government Publishing Office and the National Archives for publishing the Federal Register and eCFR APIs, and the General Services Administration for regulations.gov and api.data.gov.
 - The [Model Context Protocol](https://modelcontextprotocol.io) team for the spec and TypeScript SDK.
 - The teams who popularized the code-mode pattern for wide APIs.
 
 ---
 
-Built with ❤️ by [BLEN, Inc](https://www.blencorp.com).
-
-## About BLEN
-
-BLEN, Inc is a digital services company that provides Emerging Technology (ML/AI, RPA), Digital Modernization (Legacy to Cloud), and Human-Centered Web/Mobile Design and Development.
+Built by [BLEN, Inc](https://www.blencorp.com).
