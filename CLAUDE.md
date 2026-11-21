@@ -103,7 +103,7 @@ stdio | Streamable HTTP (+OAuth, per-IP bucket, quotas)     src/server/{stdio,ht
 
 ## Docs
 
-`docs/architecture.md` (layered design, guardrails rationale), `docs/sdk-reference.md` (full `fr`/`ecfr`/`regs` method surface + query patterns like the FR→regs `objectId` bridge), `docs/migration-v2.md` (v1→v2) and `docs/migration-v3.md` (v2→v3: fail-closed HTTP, Deno-only authenticated execution, structured results, Node 24/26) are the deep references.
+`docs/architecture.md` (layered design, guardrails rationale), `docs/sdk-reference.md` (full `fr`/`ecfr`/`regs` method surface + query patterns like the FR→regs `objectId` bridge), `docs/migration-v2.md` (v1→v2), `docs/migration-v3.md` (v2→v3: fail-closed HTTP, Host validation, Deno-only authenticated execution, execution limits) and `docs/migration-v4.md` (v3→v4: structured results, failed runs as errors, Zod 4 schemas, Node 24/26) are the deep references.
 
 ## Portal (web/) and accessibility
 
