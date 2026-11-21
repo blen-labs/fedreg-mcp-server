@@ -11,8 +11,11 @@ export interface Brand {
   tagline: string;
   /** One or two sentences under the heading. */
   summary: string;
-  /** Public source repository. */
-  repoUrl: string;
+  /**
+   * Public source repository. Leave it out while the repository is not public: the header,
+   * footer and landing page then show no source links.
+   */
+  repoUrl?: string;
   /** Documentation site root, served by this server ("/docs/"). */
   docsUrl: string;
   /** SPDX license id of the source. */

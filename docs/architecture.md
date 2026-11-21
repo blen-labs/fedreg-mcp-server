@@ -118,9 +118,11 @@ Four layered rate guardrails protect the shared upstream quota:
   (default `30`) regulations.gov upstream calls per single `execute()` run;
   exceeding it fails the call (`RegsCallBudgetExceeded`) rather than fanning
   out unbounded requests.
-- **Process-wide token bucket** — a single in-memory bucket caps total `regs`
-  upstream calls to `FEDREG_REGS_RATE_PER_HOUR` (default `1000`/hr) across all
-  tenants, protecting the shared api.data.gov key; over the limit
+- **Process-wide token bucket** — a single in-memory bucket paces total `regs`
+  upstream calls on the shared api.data.gov key: it holds
+  `FEDREG_REGS_RATE_PER_HOUR` (default `1000`) calls and refills at that many per
+  hour, so a busy hour can briefly exceed the rate (it is pacing, not a hard hourly
+  cap); over the limit
   returns `RegsRateLimited`. It sits *after* the response cache, so cache hits
   are free. **It is in-memory / single-process and does NOT coordinate across
   replicas:** N replicas allow up to N× the configured rate against the shared

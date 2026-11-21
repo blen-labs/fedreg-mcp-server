@@ -6,7 +6,7 @@ import { thirdPartyNotices } from './third-party-notices.ts';
 
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
-  plugins: [react(), tailwindcss(), thirdPartyNotices()],
+  plugins: [react(), tailwindcss(), thirdPartyNotices({ stylesheets: [fileURLToPath(new URL('./src/index.css', import.meta.url))] })],
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   build: {
     outDir: fileURLToPath(new URL('../dist/web', import.meta.url)),

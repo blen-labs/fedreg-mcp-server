@@ -40,13 +40,15 @@ export function Landing({ accountUrl, publicUrl }: { accountUrl: string; publicU
               </a>
             </Button>
           </div>
-          <p className="text-muted-foreground text-sm">
-            Open source ({brand.license}).{' '}
-            <a href={brand.repoUrl} className="hover:text-foreground underline underline-offset-4">
-              Source code on GitHub
-            </a>
-            .
-          </p>
+          {brand.repoUrl && (
+            <p className="text-muted-foreground text-sm">
+              Open source ({brand.license}).{' '}
+              <a href={brand.repoUrl} className="hover:text-foreground underline underline-offset-4">
+                Source code on GitHub
+              </a>
+              .
+            </p>
+          )}
         </div>
       </section>
 

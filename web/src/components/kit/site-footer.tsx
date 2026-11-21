@@ -21,7 +21,7 @@ export function SiteFooter() {
             </a>
           </li>
           <li><a href={brand.docsUrl} className={link}>Docs</a></li>
-          <li><a href={brand.repoUrl} className={link}>GitHub</a></li>
+          {brand.repoUrl && <li><a href={brand.repoUrl} className={link}>GitHub</a></li>}
           <li><a href={BLEN_CONTACT_URL} className={link}>Contact us</a></li>
           <li><a href="/privacy-policy" className={link}>Privacy</a></li>
           <li><a href="/terms" className={link}>Terms</a></li>

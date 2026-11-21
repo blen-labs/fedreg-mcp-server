@@ -125,11 +125,11 @@ The Federal Register and the eCFR see every user of a server as one client, and 
 - shares one gate per public API (Federal Register, eCFR) across all users: 8 requests in flight and 10 started per second, and a call that waits more than 15 s for a slot fails with `RateLimited`;
 - on a `429` from the Federal Register or eCFR, pauses every caller of that API and retries the call once after the `Retry-After` (at most 5 s); a `429` from regulations.gov is returned at once (`RateLimited`), never retried;
 - caps upstream calls per `execute()`: 100 for the Federal Register and the eCFR together (`CallBudgetExceeded`), 30 for regulations.gov (`RegsCallBudgetExceeded`);
-- keeps regulations.gov below the key's limit: 1,000 calls per hour for the whole process (`RegsRateLimited` beyond) and 500 per hour for each authenticated subject (one shared `anonymous` subject under `--insecure`; stdio has no subject, so it skips that one);
+- paces regulations.gov for each key: the operator's shared key gets a token bucket that holds 1,000 calls and refills at 1,000 an hour (`RegsRateLimited` when empty), so a busy hour can briefly pass api.data.gov's 1,000-per-hour limit and get a `429`; each authenticated subject also gets 500 calls per hour (one shared `anonymous` subject under `--insecure`; stdio skips it). In account mode each account's own key instead gets a fixed hourly window of 1,000 calls, kept in PostgreSQL, and the per-subject quota does not apply;
 - caches responses for 5 minutes, so repeated questions do not spend quota;
 - rejects results over 8 MiB returned from `execute` (`ResultTooLarge`): use `fields` and `per_page` to keep records small.
 
-These guardrails are in memory, so run **one replica**; with more, divide the hourly rates by the replica count.
+These guardrails are in memory (except account mode's per-account window, which is in PostgreSQL), so run **one replica**; with more, divide the hourly rates by the replica count.
 
 ## Personal accounts (hosted mode)
 
@@ -197,7 +197,7 @@ The knobs below are every environment variable the server reads at startup (defa
 | `FEDREG_UPSTREAM_MAX_WAIT_MS` | `15000` | Longest a call waits for a slot before failing with `RateLimited`. Must be ≥ 1. |
 | `FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE` | `100` | Federal Register + eCFR calls per `execute()` (`CallBudgetExceeded`). Must be ≥ 1. |
 | `FEDREG_REGS_MAX_CALLS_PER_EXECUTE` | `30` | regulations.gov calls per `execute()` (`RegsCallBudgetExceeded`). `0` blocks every regs call. |
-| `FEDREG_REGS_RATE_PER_HOUR` | `1000` | Process-wide hourly cap on regs upstream calls (protects the shared key). Must be ≥ 1. `0` is not "unlimited"; unset the key to disable regs. |
+| `FEDREG_REGS_RATE_PER_HOUR` | `1000` | regs pacing per key: the shared key's token bucket (capacity and hourly refill), and each account's hourly window in account mode. Must be ≥ 1. `0` is not "unlimited"; unset the key to disable regs. |
 | `FEDREG_REGS_SUBJECT_RATE_PER_HOUR` | `500` | Per authenticated subject per hour (HTTP only; not applied in account mode, which limits per account in PostgreSQL). Must be ≥ 1. |
 | `FEDREG_CACHE_TTL_MS` / `FEDREG_CACHE_MAX_ITEMS` | `300000` / `2000` | Response cache. |
 | `FEDREG_MAX_CONCURRENT_EXECUTIONS` / `FEDREG_MAX_EXECUTIONS_PER_SUBJECT` | `8` / `2` | Simultaneous executions per server / per authenticated subject (`Busy` beyond). Must be ≥ 1. |

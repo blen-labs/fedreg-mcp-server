@@ -22,12 +22,14 @@ export function SiteHeader() {
                 Docs
               </a>
             </li>
-            <li>
-              <a href={brand.repoUrl} className={navLink}>
-                <GitBranch className="size-4" />
-                GitHub
-              </a>
-            </li>
+            {brand.repoUrl && (
+              <li>
+                <a href={brand.repoUrl} className={navLink}>
+                  <GitBranch className="size-4" />
+                  GitHub
+                </a>
+              </li>
+            )}
             <li>
               {signedIn ? (
                 <a href="/account" className={navLink}>
