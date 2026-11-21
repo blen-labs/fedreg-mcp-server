@@ -24,7 +24,7 @@ export const brand: Brand = {
       </>
     ),
     publicNote:
-      'Search Federal Register and eCFR without signing in, including running queries. regulations.gov needs your own API key, so use the server URL above for that.',
+      'Search the Federal Register and eCFR without signing in, including running queries. For regulations.gov, use the server URL above with your own API key; without an account it works only if this server’s operator has configured a shared key.',
     guidesHref: '/docs/connect/',
   },
   examples: [
@@ -48,7 +48,7 @@ export const brand: Brand = {
     },
     {
       name: 'regulations.gov API',
-      description: 'Rulemaking dockets, documents and public comments. Needs your own regulations.gov API key.',
+      description: 'Rulemaking dockets, documents and public comments. Signed in, your own regulations.gov API key; without an account, only if the operator configured a shared key.',
       href: '/docs/reference/sdk/',
     },
   ],
