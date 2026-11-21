@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { changedManifestFields, changedPackages, productionPackages, releaseReason, computeBump, bumpVersion, renderChangelogSection, insertChangelogSection, updateVersionMarkers } from './release-lib.mjs';
+import { BUNDLED_DEV_DEPENDENCIES, changedManifestFields, changedPackages, productionPackages, releaseReason, computeBump, bumpVersion, renderChangelogSection, insertChangelogSection, updateVersionMarkers } from './release-lib.mjs';
 
 const MARKER_FILES = ['src/server/mcpServer.ts', 'src/sdk/bindings.ts'];
 
@@ -30,8 +30,10 @@ const INSTALL_FILES = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 
 const BIG = 64 * 1024 * 1024;
 
 /**
- * The production packages the lockfile at `rev` installs, as pnpm reads it (only the install
- * files, no node_modules), or null when `rev` has no lockfile.
+ * The packages that reach users from the lockfile at `rev`, as pnpm reads it (only the install
+ * files, no node_modules): the production tree, which the MCPB bundle installs, plus the bundled
+ * devDependencies (the portal's libraries and build tools, compiled into dist/web) and what they
+ * pull in. Null when `rev` has no lockfile.
  */
 function productionTreeAt(rev) {
   const dir = mkdtempSync(join(tmpdir(), 'release-tree-'));
@@ -48,10 +50,14 @@ function productionTreeAt(rev) {
       if (file === 'pnpm-lock.yaml') lockfile = true;
     }
     if (!lockfile) return null;
-    const out = execFileSync('pnpm', ['ls', '--prod', '--depth', 'Infinity', '--json', '--lockfile-only'], {
+    const ls = (...flags) => JSON.parse(execFileSync('pnpm', ['ls', ...flags, '--depth', 'Infinity', '--json', '--lockfile-only'], {
       cwd: dir, encoding: 'utf8', maxBuffer: BIG, stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return productionPackages(JSON.parse(out));
+    }));
+    const shipped = new Set([
+      ...productionPackages(ls('--prod')),
+      ...productionPackages(ls('--dev'), { roots: BUNDLED_DEV_DEPENDENCIES }),
+    ]);
+    return [...shipped].sort();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

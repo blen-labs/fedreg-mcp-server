@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  BUNDLED_DEV_DEPENDENCIES,
   changedManifestFields,
   changedPackages,
   productionPackages,
@@ -106,6 +107,15 @@ describe('productionPackages / changedPackages', () => {
     expect(productionPackages(tree)).toEqual(['body-parser@2.4.0', 'debug@4.4.3', 'express@5.3.0', 'isolated-vm@7.0.2', 'node-gyp-build@4.8.4']);
     expect(productionPackages([{}])).toEqual([]);
   });
+  it('with roots, keeps only those top-level packages (dev ones too) and what they pull in', () => {
+    const tree = [{
+      devDependencies: {
+        react: { version: '19.3.1', dependencies: { scheduler: { version: '0.27.0' } } },
+        vitest: { version: '5.1.1', dependencies: { tinypool: { version: '2.0.0' } } },
+      },
+    }];
+    expect(productionPackages(tree, { roots: ['react'] })).toEqual(['react@19.3.1', 'scheduler@0.27.0']);
+  });
   it('lists what left and what joined', () => {
     expect(changedPackages(['a@1.0.0', 'ms@2.1.3'], ['a@1.0.0', 'ms@2.1.2'])).toEqual(['-ms@2.1.3', '+ms@2.1.2']);
     expect(changedPackages(['a@1.0.0'], ['a@1.0.0'])).toEqual([]);
@@ -162,6 +172,31 @@ describe('changedManifestFields', () => {
     expect(changedManifestFields(base, edit(p => { p.scripts.prepack = 'pnpm run build'; }))).toEqual(['scripts']);
     // A script nobody has classified yet counts (fail safe).
     expect(changedManifestFields(base, edit(p => { p.scripts['bundle:extra'] = 'node x.js'; }))).toEqual(['scripts']);
+  });
+
+  it('counts the portal\'s bundled devDependencies: they are compiled into dist/web', () => {
+    expect(changedManifestFields(base, edit(p => { p.devDependencies.react = '19.3.1'; }))).toEqual(['bundledDevDependencies']);
+    const withReact = edit(p => { p.devDependencies.react = '19.3.0'; });
+    expect(changedManifestFields(withReact, edit(p => { p.devDependencies.react = '19.3.1'; }))).toEqual(['bundledDevDependencies']);
+    expect(changedManifestFields(withReact, edit(p => { p.devDependencies.react = '19.3.0'; p.devDependencies.vitest = '^5.0.0'; }))).toEqual([]);
+  });
+
+  it('lists every package the portal imports (web/) as bundled', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+      e.isDirectory() ? (e.name === 'e2e' ? [] : files(join(dir, e.name))) : /\.(tsx?|css)$/.test(e.name) ? [join(dir, e.name)] : []);
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+    const imported = new Set<string>();
+    for (const file of files('web')) {
+      for (const [, spec] of readFileSync(file, 'utf8').matchAll(/(?:from|@import)\s+'([^'.][^']*)'/g)) {
+        if (spec!.startsWith('@/') || spec!.startsWith('node:')) continue;
+        imported.add(spec!.startsWith('@') ? spec!.split('/').slice(0, 2).join('/') : spec!.split('/')[0]!);
+      }
+    }
+    // Production dependencies ship anyway; every other import must be a listed bundled devDependency.
+    const missing = [...imported].filter(name => !pkg.dependencies?.[name] && !BUNDLED_DEV_DEPENDENCIES.includes(name));
+    expect(missing).toEqual([]);
   });
 });
 

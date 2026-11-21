@@ -11,7 +11,11 @@ export declare const SHIPPED_PATHS: readonly string[];
 export declare function isShippedPath(path: string): boolean;
 export declare function changedManifestFields(before: Record<string, unknown>, after: Record<string, unknown>): string[];
 export declare const DEV_ONLY_SCRIPTS: readonly string[];
-export declare function productionPackages(tree: Array<{ dependencies?: object; optionalDependencies?: object }>): string[];
+export declare const BUNDLED_DEV_DEPENDENCIES: readonly string[];
+export declare function productionPackages(
+  tree: Array<{ dependencies?: object; optionalDependencies?: object; devDependencies?: object }>,
+  options?: { roots?: readonly string[] },
+): string[];
 export declare function changedPackages(before: string[], after: string[]): string[];
 export declare function releaseReason(
   commits: ReleaseCommit[],

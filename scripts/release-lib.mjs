@@ -38,6 +38,18 @@ export const SHIPPED_PATHS = Object.freeze([
   '.pnpmfile.cjs', 'scripts/mcpb-prepare.mjs',
 ]);
 
+/**
+ * devDependencies that still reach users: the portal (web/) is built into dist/web, which the npm
+ * package and the MCPB bundle ship, so its runtime libraries and the tools that generate its
+ * output count as shipped. A change to their version, or to anything they pull in, releases.
+ * test/release.spec.ts fails when web/ imports a package missing from this list.
+ */
+export const BUNDLED_DEV_DEPENDENCIES = Object.freeze([
+  'react', 'react-dom', 'react-router', 'react-markdown', 'radix-ui', 'lucide-react',
+  'class-variance-authority', 'clsx', 'tailwind-merge', 'tw-animate-css',
+  'tailwindcss', '@tailwindcss/vite', 'vite', '@vitejs/plugin-react',
+]);
+
 /** package.json fields that never reach an install of the published package. */
 const UNSHIPPED_MANIFEST_FIELDS = new Set(['version', 'devDependencies', 'packageManager']);
 /**
@@ -64,6 +76,11 @@ export function changedManifestFields(before, after) {
   const shipped = (manifest) => {
     const out = {};
     for (const [key, value] of Object.entries(manifest)) {
+      if (key === 'devDependencies' && value && typeof value === 'object') {
+        const bundled = Object.entries(value).filter(([name]) => BUNDLED_DEV_DEPENDENCIES.includes(name));
+        if (bundled.length) out.bundledDevDependencies = Object.fromEntries(bundled);
+        continue;
+      }
       if (UNSHIPPED_MANIFEST_FIELDS.has(key)) continue;
       if (key === 'scripts' && value && typeof value === 'object') {
         const shipped = Object.entries(value).filter(([name]) => !DEV_ONLY_SCRIPTS.includes(name));
@@ -82,11 +99,13 @@ export function changedManifestFields(before, after) {
 }
 
 /**
- * Every `name@version` in a `pnpm ls --prod --depth Infinity --json` tree. pnpm prints a package's
- * dependencies once and marks later occurrences deduped, so every node is visited.
- * @param {Array<{dependencies?: object, optionalDependencies?: object}>} tree
+ * Every `name@version` in a `pnpm ls --depth Infinity --json` tree. pnpm prints a package's
+ * dependencies once and marks later occurrences deduped, so every node is visited. With `roots`,
+ * only those top-level packages (production, optional or dev) and what they pull in.
+ * @param {Array<{dependencies?: object, optionalDependencies?: object, devDependencies?: object}>} tree
+ * @param {{ roots?: readonly string[] }} [options]
  */
-export function productionPackages(tree) {
+export function productionPackages(tree, { roots } = {}) {
   const found = new Set();
   const walk = (deps) => {
     for (const [name, node] of Object.entries(deps ?? {})) {
@@ -95,9 +114,12 @@ export function productionPackages(tree) {
       walk(node.optionalDependencies);
     }
   };
+  const only = (deps) => (roots ? Object.fromEntries(Object.entries(deps ?? {}).filter(([name]) => roots.includes(name))) : deps);
   for (const importer of tree) {
-    walk(importer.dependencies);
-    walk(importer.optionalDependencies);
+    walk(only(importer.dependencies));
+    walk(only(importer.optionalDependencies));
+    // With `roots`, also the matching devDependencies (and everything they pull in).
+    if (roots) walk(only(importer.devDependencies));
   }
   return [...found].sort();
 }
