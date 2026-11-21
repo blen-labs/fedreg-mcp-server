@@ -1,0 +1,62 @@
+---
+title: Tools
+description: Inputs, results, and limits of search_api, describe_schema, and execute.
+---
+
+The server has three tools. All three are read-only. Each result is JSON text.
+
+## search_api
+
+Searches the SDK method documentation and the response fields.
+
+| Input | Type | Notes |
+| --- | --- | --- |
+| `query` | string | What you want to do, in plain words. |
+| `k` | integer, 1 to 50 | The number of results. The default is 10. |
+
+It returns `{ hits, note }`. Each hit has an `id`, a `kind`, a `binding`, a `description`, and a
+`score`. A hit for a method also has its `signature` and a ready-to-run `example`.
+
+## describe_schema
+
+Looks up entries by name. Give exactly one of the two inputs.
+
+| Input | Type | Notes |
+| --- | --- | --- |
+| `path` | string | One exact entry, for example `fr.documents.search`. |
+| `prefix` | string | Every entry in a namespace, for example `regs.`. |
+
+It returns `{ found: true, entries }`, or `{ found: false, message }` when nothing matches.
+
+## execute
+
+Runs JavaScript in the sandbox, with `fr`, `ecfr`, and `regs` as globals.
+
+| Input | Type | Notes |
+| --- | --- | --- |
+| `code` | string | Plain JavaScript. Type annotations are rejected. Top-level `await` and `return` work. |
+| `timeoutMs` | integer, 100 to 60,000 | The time limit of the run. The default is 15,000. |
+| `memoryMb` | integer, 16 to 256 | The memory limit of the run. The default is 64. |
+
+A run that succeeds returns `{ ok: true, value, logs, durationMs }`, where `value` is what the
+program returned.
+
+A run that fails returns `{ ok: false, error: { name, message, status? }, logs, durationMs }`.
+It is a normal tool result, so read `ok`. The [SDK reference](/reference/sdk/#errors) lists the
+error names.
+
+### Limits of one run
+
+| What | Default limit | Past the limit |
+| --- | --- | --- |
+| Code | 256 KiB | `CodeTooLarge` |
+| Returned value | 8 MiB | `ResultTooLarge` |
+| Logs | 1 MiB or 10,000 lines | No error. The logs are cut. |
+| Arguments of one SDK call | 1 MiB | `ArgumentsTooLarge` |
+| SDK calls pending at once | 100 | `TooManyPendingCalls` |
+| Federal Register and eCFR calls | 100 together | `CallBudgetExceeded` |
+| regulations.gov calls | 30 | `RegsCallBudgetExceeded` |
+| Programs running at once | 8 in all, 2 for each signed-in person | `Busy` |
+
+A self-hosted server can change the call limits and the number of programs at once. See
+[every setting](https://github.com/blen-labs/fedreg-mcp-server/blob/main/.env.example).

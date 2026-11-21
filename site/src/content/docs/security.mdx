@@ -1,0 +1,40 @@
+---
+title: Security
+description: What the sandbox allows, where keys live, and how to report a vulnerability.
+---
+
+The server runs code that a model wrote, and it treats that code as untrusted.
+
+## The sandbox
+
+- **No access to your computer.** A program has no network, file system, environment, or
+  subprocess access.
+- **A check before the run.** The server parses each program and rejects imports, `eval`, and
+  references to host globals.
+- **An isolated runtime.** The program runs in a fresh V8 isolate, or in a separate Deno process
+  with no permissions. With sign-in, the server uses the Deno process only.
+- **A deadline that the server owns.** The server stops a run that passes its time limit.
+- **One way out.** A program reaches the government APIs only through the registered read methods
+  of the `fr`, `ecfr`, and `regs` SDK.
+
+## Keys
+
+- Your regulations.gov key stays in the server process. The server never passes it into the
+  sandbox.
+- In account mode, if an upstream echoes a key back, the server replaces it with `[REDACTED]` in
+  results and errors.
+- In account mode, one person's key never serves another person's calls, and the server's own
+  key never serves a signed-in person.
+
+## What the server does not do
+
+- It does not change anything at the Federal Register, the eCFR, or regulations.gov. All three
+  tools are read-only, and the SDK has no method that submits a comment.
+- It does not need a key for the Federal Register or the eCFR.
+
+## Report a vulnerability
+
+Do not open a public issue. Open a
+[private security advisory](https://github.com/blen-labs/fedreg-mcp-server/security/advisories/new).
+The full policy and the threat model are in
+[SECURITY.md](https://github.com/blen-labs/fedreg-mcp-server/blob/main/SECURITY.md).

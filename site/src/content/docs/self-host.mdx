@@ -1,0 +1,68 @@
+---
+title: Self-host
+description: Run the server's HTTP transport for yourself or for other people, and where the full guides are.
+---
+
+Remote clients such as ChatGPT, Claude custom connectors, and Gemini Enterprise need an HTTPS
+endpoint. The server has a Streamable HTTP transport for that. Pick the mode by who uses it.
+
+| Mode | Who it serves | Whose key | How to start it |
+| --- | --- | --- | --- |
+| Local | You, on your computer | Yours | `--http --insecure` |
+| Single owner | You, from anywhere | Yours | `--http` with an OIDC provider |
+| Accounts | Many people | Each person's own | `--http` with `FEDREG_AUTH_PROVIDER=accounts` |
+
+A regulations.gov key is personal. The single-owner mode answers every token holder with the
+server's own key, so use it only for yourself. To host for other people, use account mode.
+
+## Local
+
+```bash
+FEDREG_REGS_API_KEY=... npx @blen/fedreg-mcp-server --http --insecure --port 8080
+```
+
+There is no sign-in. The server binds to `127.0.0.1` unless `HOST` or `--host` names another
+address. The key is optional: leave it out and `regs` is off.
+
+## Single owner
+
+```bash
+FEDREG_REGS_API_KEY=... \
+FEDREG_AUTH_PROVIDER=clerk \
+FEDREG_AUTH_ISSUER=https://<tenant>.clerk.accounts.dev \
+FEDREG_AUTH_AUDIENCE=https://your-host.example.com/mcp \
+FEDREG_AUTH_JWKS_URL=https://<tenant>.clerk.accounts.dev/.well-known/jwks.json \
+FEDREG_PUBLIC_ORIGIN=https://your-host.example.com \
+  npx @blen/fedreg-mcp-server --http
+```
+
+The issuer, the audience, and an HTTPS JWKS URL are all required. The provider can be `clerk`,
+`workos`, `auth0`, or `generic-oidc`. Then give your client the URL
+`https://your-host.example.com/mcp`.
+
+## Accounts
+
+Account mode adds Google sign-in, an account page where each person saves their own
+regulations.gov key, and OAuth for MCP clients. The keys are encrypted in PostgreSQL. It serves
+two endpoints: `/mcp/account` for signed-in people, and `/mcp` without sign-in for the Federal
+Register and the eCFR. See the
+[account mode guide](https://github.com/blen-labs/fedreg-mcp-server/blob/main/docs/accounts.md).
+
+## Rules for every deployment
+
+- **Run one replica for each shared key.** The pacing of the Federal Register and eCFR calls, and
+  the hourly limit of a shared regulations.gov key, are in memory. Two instances double them.
+- **Sign-in is required.** `--http` refuses to start without `--insecure` or a configured provider.
+- **Install Deno.** With sign-in, the server runs each program in a separate Deno process, and
+  `execute` is unavailable without it.
+- **Name your host.** To listen on an address that is not loopback, set `FEDREG_PUBLIC_ORIGIN` or
+  `FEDREG_ALLOWED_HOSTS`.
+
+## Full guides
+
+These documents are in the repository:
+
+- [Architecture](https://github.com/blen-labs/fedreg-mcp-server/blob/main/docs/architecture.md)
+- [Account mode](https://github.com/blen-labs/fedreg-mcp-server/blob/main/docs/accounts.md)
+- [Railway walkthrough](https://github.com/blen-labs/fedreg-mcp-server/blob/main/deploy/RAILWAY.md)
+- [Every setting](https://github.com/blen-labs/fedreg-mcp-server/blob/main/.env.example)

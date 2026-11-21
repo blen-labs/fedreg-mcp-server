@@ -1,0 +1,18 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { formatSnippet } from '../lib/format.mjs';
+
+interface Props {
+  /** A file name in the repository's examples/ folder. */
+  file: string;
+}
+
+// examples/ is the single source: test/examples.spec.ts keeps each file runnable in the sandbox.
+// The path starts at the working directory because the build bundles this component elsewhere.
+const { file } = Astro.props;
+const code = await formatSnippet(readFileSync(resolve(process.cwd(), '../examples', file), 'utf8'));
+---
+
+<Code code={code} lang="js" />
