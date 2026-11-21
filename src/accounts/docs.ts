@@ -65,7 +65,14 @@ export function docsHandler(root: string): express.Handler | undefined {
   const notFound = readFileSync(join(root, existsSync(join(root, '404.html')) ? '404.html' : 'index.html'), 'utf8');
   return (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-    files(req, res, () => {
+    files(req, res, (error?: unknown) => {
+      // A read failure (5xx) is not a missing page; only 404s and rejected paths fall through.
+      if (error) {
+        // serve-static set the file's headers (Content-Length, caching) before the read failed; an
+        // error response must not carry them, or a 500 is cached as the page.
+        for (const name of res.getHeaderNames()) res.removeHeader(name);
+        return next(error);
+      }
       res.status(404).set({ 'Content-Security-Policy': policy, 'Cache-Control': 'no-store' }).type('html').send(notFound);
     });
   };
