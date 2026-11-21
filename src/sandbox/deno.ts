@@ -426,4 +426,6 @@ for await (const chunk of Deno.stdin.readable) {
     else if (msg.t === 'rpc-result') worker.postMessage(msg);
   }
 }
+// The host went away (stdin closed): do not leave a possibly busy Worker (or the watchdog timer) running as an orphan.
+Deno.exit(0);
 `;

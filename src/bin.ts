@@ -142,7 +142,7 @@ async function main(): Promise<void> {
       allowedOrigins,
       publicOrigin: process.env.FEDREG_PUBLIC_ORIGIN,
       auth: {
-        provider: (process.env.FEDREG_AUTH_PROVIDER as AuthConfigProvider) ?? 'none',
+        provider: (process.env.FEDREG_AUTH_PROVIDER?.trim() as AuthConfigProvider) || 'none',
         issuer: process.env.FEDREG_AUTH_ISSUER,
         audience: process.env.FEDREG_AUTH_AUDIENCE,
         jwksUrl: process.env.FEDREG_AUTH_JWKS_URL,

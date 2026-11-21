@@ -101,9 +101,11 @@ export async function createAccountApp(
     ctx => buildMcpServer(deps, { subject: ctx.authInfo?.extra?.userId as string | undefined }),
     { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.mcp_handler_error') },
   );
-  // Anonymous endpoint: the same tools with no subject. No token is read or required.
+  // Anonymous endpoint: the same tools, no token read or required. Each client address is its
+  // own subject, so the per-subject execution cap stops one anonymous client from taking every
+  // execution slot from everyone else.
   const publicMcp = createMcpHandler(
-    () => buildMcpServer(publicDeps, {}),
+    ctx => buildMcpServer(publicDeps, { subject: ctx.authInfo?.extra?.anonymousSubject as string | undefined }),
     { legacy: 'stateless', maxSubscriptions: 0, onerror: () => log.warn('account.public_mcp_handler_error') },
   );
   const resource = `${config.origin}${ACCOUNT_MCP_PATH}`;
@@ -200,6 +202,8 @@ export async function createAccountApp(
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
     if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
     if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
+    // toNodeHandler forwards req.auth to the factory; no token is involved.
+    Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${ipOf(req) ?? 'unknown'}` } } });
     await publicNode(req, res);
   });
   // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
