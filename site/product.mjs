@@ -34,3 +34,6 @@ export const llmsDetails = [
   'It has three tools: `search_api`, `describe_schema`, and `execute`.',
   'Each page below is also available on its own, as Markdown.',
 ].join('\n');
+
+/** Sidebar and page-title overrides by slug (see src/lib/pages.mjs); none for this server. */
+export const pageLabels = {};
