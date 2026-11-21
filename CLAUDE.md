@@ -91,6 +91,7 @@ stdio | Streamable HTTP (+OAuth, per-IP bucket, quotas)     src/server/{stdio,ht
 
 ## Known traps
 
+- **Don't add an Origin allowlist to the signed-in MCP endpoint (`/mcp/account`).** Hosted connectors (claude.ai, chatgpt.com) send their own `Origin` there; every request carries a bearer token (never a cookie) and the Host check already blocks DNS rebinding. Only the anonymous `/mcp` (no token to check) refuses foreign Origins (`FEDREG_ALLOWED_ORIGINS` extends it). A test pins both.
 - `LATEST_PROTOCOL_VERSION` / `SUPPORTED_PROTOCOL_VERSIONS` exported by the v2 SDK are the **legacy-era** vocabulary (`2025-11-25` and older) kept for the backward-compat leg — they are NOT the revision this server speaks, and reading them as an era signal is the documented way to wrongly conclude v2 lacks 2026-07-28 support (upstream PR #2585). The modern value lives in the SDK's `core-internal` as `FIRST_MODERN_PROTOCOL_VERSION` but is not exported, so use `MCP_PROTOCOL_VERSION` from `src/server/mcpServer.ts`; a test pins `/health` to it.
 
 - Execute limits (`timeoutMs`, `memoryMb`) are per-call Zod defaults on the `execute` tool in `src/tools/execute.ts` — they are NOT env-configurable; don't invent `FEDREG_EXEC_*` vars (concurrency caps are the exception: `FEDREG_MAX_CONCURRENT_EXECUTIONS` / `FEDREG_MAX_EXECUTIONS_PER_SUBJECT`). Transport is chosen only by the `--http` flag, never by env.
