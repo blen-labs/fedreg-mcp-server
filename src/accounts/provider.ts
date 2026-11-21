@@ -20,6 +20,8 @@ export function createAuth(config: AccountConfig, store: Store) {
     database: store.pool,
     trustedOrigins: [config.origin],
     logger: { disabled: true },
+    // Sign-in and OAuth errors go to the portal's own page instead of Better Auth's unstyled one.
+    onAPIError: { errorURL: '/error' },
     advanced: { useSecureCookies: config.production },
     // Better Auth enables its limiter only when NODE_ENV is exactly 'production', but an unset
     // NODE_ENV is production here. The app exempts OAuth registration and token endpoints from

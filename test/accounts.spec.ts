@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createServer, type Server } from 'node:http';
+import { createServer, get as httpGet, type Server } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { Pool } from 'pg';
@@ -233,7 +233,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   // Needs the Vite bundle: `pnpm build` (CI builds before testing). Skipped, not failed, without it.
   const webBuilt = existsSync(new URL('../dist/web/index.html', import.meta.url));
   it.skipIf(!webBuilt)('serves the SAM.gov-style frontend and policies with same-origin assets (needs pnpm build)', async () => {
-    for (const path of ['/', '/sign-in', '/account', '/connect', '/consent', '/privacy-policy', '/terms']) {
+    for (const path of ['/', '/sign-in', '/account', '/connect', '/consent', '/privacy-policy', '/terms', '/error']) {
       const page = await fetch(`${config.origin}${path}`);
       expect(page.status).toBe(200);
       expect(page.headers.get('content-security-policy')).toContain("script-src 'self'");
@@ -248,6 +248,21 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       }
     }
     expect(await (await fetch(`${config.origin}/api/portal/config`)).json()).toMatchObject({ google: true, email: false });
+    // An unknown path: a browser navigation gets the portal's not-found page with status 404;
+    // an API client keeps the short text answer.
+    // fetch() always sends `sec-fetch-mode: cors`, so send a browser navigation with node:http.
+    const { port } = new URL(config.origin);
+    const missing = await new Promise<{ status?: number; type?: string; body: string }>((resolve, reject) =>
+      httpGet({ host: '127.0.0.1', port, path: '/no-such-page', headers: { host: new URL(config.origin).host, 'sec-fetch-mode': 'navigate', accept: 'text/html' } }, (res) => {
+        let body = '';
+        res.setEncoding('utf8').on('data', (chunk: string) => (body += chunk)).on('end', () => resolve({ status: res.statusCode, type: res.headers['content-type'], body }));
+      }).on('error', reject));
+    expect(missing.status).toBe(404);
+    expect(missing.type).toContain('text/html');
+    expect(missing.body).toContain('/assets/');
+    const api = await fetch(`${config.origin}/no-such-page`, { headers: { accept: 'application/json' } });
+    expect(api.status).toBe(404);
+    expect(await api.text()).toBe('Not found');
   });
   it('validates the separate connection step, preserves saved keys on failure, and allows cancellation', async () => {
     const { oauth_query, state } = await beginAuthorization();
@@ -429,6 +444,20 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   it('rejects a foreign Origin on /mcp/account even with a valid token', async () => {
     const a = await token();
     expect((await mcp(a.access_token, 'return 42;', '/mcp/account', 'https://evil.example')).status).toBe(403);
+    // A browser client fails at the preflight with a clear status, and CORS never says `*` for
+    // an MCP endpoint; the server's own origin is echoed.
+    const preflight = (origin: string, path = '/mcp/account') => fetch(`${config.origin}${path}`, {
+      method: 'OPTIONS', headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' },
+    });
+    for (const path of ['/mcp/account', '/mcp']) {
+      expect((await preflight('https://evil.example', path)).status).toBe(403);
+      const own = await preflight(config.origin, path);
+      expect(own.status).toBe(204);
+      expect(own.headers.get('access-control-allow-origin')).toBe(config.origin);
+    }
+    // OAuth discovery stays open to every client.
+    const discovery = await fetch(`${config.origin}/.well-known/oauth-protected-resource/mcp/account`, { headers: { origin: 'https://app.example' } });
+    expect(discovery.headers.get('access-control-allow-origin')).toBe('*');
     expect((await mcp(a.access_token, 'return 42;', '/mcp/account', config.origin)).status).toBe(200);
     expect((await mcp(a.access_token)).status).toBe(200);
   });

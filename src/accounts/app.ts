@@ -19,6 +19,8 @@ import { resolve } from 'node:path';
 
 const CROSS_ORIGIN_PATHS =
   /^\/(?:mcp(?:\/account)?|\.well-known\/(?:oauth-protected-resource|oauth-authorization-server|openid-configuration)(?:\/[\w-]+)*|api\/auth\/(?:oauth2\/(?:register|token|revoke)|\.well-known\/(?:oauth-authorization-server|openid-configuration)))$/;
+/** The MCP endpoints, where Origin is validated (see the CORS middleware). */
+const MCP_PATHS = new Set([PUBLIC_MCP_PATH, ACCOUNT_MCP_PATH]);
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
@@ -42,6 +44,26 @@ function registeredRedirects(body: Buffer): unknown {
     return [];
   }
 }
+/** Client-side routes of the portal (web/src/main.tsx), served as index.html. */
+const PORTAL_ROUTES = ['/', '/sign-in', '/connect', '/consent', '/account', '/privacy-policy', '/terms', '/error'];
+const PORTAL_CSP =
+  "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+
+/** A top-level page load in a browser (not fetch, not an API client). */
+function isNavigation(req: express.Request): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  const mode = req.get('sec-fetch-mode');
+  if (mode) return mode === 'navigate';
+  return req.accepts(['json', 'html']) === 'html';
+}
+
+const TOO_MANY_PAGE = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Too many requests · Federal Regulations MCP</title></head>
+<body><main><h1>Too many requests</h1><p>This address sent too many requests. Wait a minute, then <a href="/">try again</a>.</p></main></body>
+</html>
+`;
+
 /** MCP's rule for redirect URIs: HTTPS, or plain HTTP only to this computer. */
 export function allowedRedirect(value: unknown) {
   if (typeof value !== 'string') return false;
@@ -139,7 +161,19 @@ export async function createAccountApp(
     // discovery, registration, token and /mcp from other origins. These use bearer tokens or
     // client credentials, never cookies, and the Host check above prevents DNS rebinding.
     if (CROSS_ORIGIN_PATHS.test(req.path)) {
-      res.set(CORS_HEADERS);
+      if (MCP_PATHS.has(req.path)) {
+        // MCP's transport rule: a request whose Origin is not allowed gets 403. Allowed are this
+        // server's origin, loopback, and FEDREG_ALLOWED_ORIGINS; CORS echoes only those, so a
+        // browser client from another site fails at the preflight with a clear reason.
+        const origin = req.headers.origin;
+        if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? [])) {
+          log.warn('account.mcp_origin_rejected');
+          return res.status(403).json({ error: 'origin_not_allowed' });
+        }
+        res.set({ ...CORS_HEADERS, 'Access-Control-Allow-Origin': origin ?? '*', Vary: 'Origin' });
+      } else {
+        res.set(CORS_HEADERS);
+      }
       if (req.method === 'OPTIONS')
         return res
           .status(204)
@@ -174,14 +208,22 @@ export async function createAccountApp(
   // Production reads the built page once; development rereads it so `pnpm dev:web` rebuilds show.
   const loadIndex = () => readFile(resolve(webRoot, 'index.html'), 'utf8').catch(() => undefined);
   let indexHtml: string | undefined;
-  app.get(['/', '/sign-in', '/connect', '/consent', '/account', '/privacy-policy', '/terms'], async (_req, res) => {
+  const sendPortal = async (res: express.Response, status = 200) => {
     const html = config.production ? (indexHtml ??= await loadIndex()) : await loadIndex();
     if (!html) return res.status(503).send('The web interface is not built. Run pnpm build.');
-    res.set('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
-      .type('html').send(html);
+    res.status(status).set('Content-Security-Policy', PORTAL_CSP).type('html').send(html);
+  };
+  app.get(PORTAL_ROUTES, async (_req, res) => {
+    await sendPortal(res);
   });
-  const tooMany = (res: express.Response) =>
-    res.status(429).set('Retry-After', '60').send('Too many requests');
+  const tooMany = (res: express.Response) => {
+    res.status(429).set('Retry-After', '60');
+    // A person in a browser gets a page; API clients get the short text they always did.
+    if (isNavigation(res.req)) {
+      return res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'").type('html').send(TOO_MANY_PAGE);
+    }
+    return res.send('Too many requests');
+  };
   app.use(async (req, res, next) => {
     // Hosted connectors (ChatGPT, Claude) send every user's OAuth and MCP traffic from a few
     // shared egress IPs, so those endpoints are limited elsewhere: Better Auth limits each OAuth
@@ -201,17 +243,11 @@ export async function createAccountApp(
   });
   // In memory per replica, like the base transport's limiter it mirrors.
   const publicLimiter = new IpRateLimiter(config.ipRps ?? 5, config.ipBurst ?? 20);
-  // As in the base transport (MCP's Origin rule), for both MCP routes: a browser on another site
-  // must not drive them, with or without a token. Non-browser clients send no Origin and pass.
-  const mcpOriginOk = (req: express.Request) => {
-    const origin = req.headers.origin;
-    return typeof origin !== 'string' || originAllowed(origin, config.origin, config.allowedOrigins ?? []);
-  };
   // Federal Register and eCFR need no sign-in. A bearer token sent here is ignored: signed-in
   // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
     if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
-    if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
+    // Origin was checked with the CORS headers above; non-browser clients send no Origin.
     // toNodeHandler forwards req.auth to the factory; no token is involved.
     Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${ipOf(req) ?? 'unknown'}` } } });
     await publicNode(req, res);
@@ -219,7 +255,6 @@ export async function createAccountApp(
   // No body parser and no size cap, matching the base HTTP transport: large `execute` scripts
   // must work in both modes. The SDK reads the body only after the token checks below pass.
   app.all(ACCOUNT_MCP_PATH, async (req, res) => {
-    if (!mcpOriginOk(req)) return res.status(403).json({ error: 'origin_not_allowed' });
     const challenge = (status: number, error: string) =>
       res
         .status(status)
@@ -379,7 +414,12 @@ export async function createAccountApp(
     },
   );
   installPortal(app, config, store, auth, fetcher, ipOf);
-  app.use((_req, res) => res.status(404).send('Not found'));
+  // Unknown paths: a person in a browser gets the portal's own not-found page (status 404);
+  // API clients get the short text they always did.
+  app.use(async (req, res) => {
+    if (isNavigation(req)) return sendPortal(res, 404);
+    res.status(404).send('Not found');
+  });
   app.use(
     (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       if (
