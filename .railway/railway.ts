@@ -4,8 +4,13 @@ import { defineRailway, github, project, service } from 'railway/iac';
 // See https://docs.railway.com/infrastructure-as-code#multi-repo-projects
 export const partial = 'fedreg-mcp-server';
 export default defineRailway(() => {
-  // One instance: per-client quotas, execution caps and caches are in-process, and the
-  // regulations.gov key's hourly budget is shared by every caller (see deploy/railway.toml).
+  // One instance: the per-client quotas, execution caps, token buckets and caches are in-process, and
+  // the regulations.gov key's hourly budget is shared by every caller, so a second replica would
+  // double the effective rate against the same upstream key and split the quota accounting.
+  // Railway activates a new deployment before it sends SIGTERM to the old one, so deploys overlap
+  // briefly however this is set; overlapSeconds 0 keeps that as short as possible. On SIGTERM the
+  // server cancels running executions and in-flight upstream calls at once, so 15 s of draining is
+  // ample before SIGKILL. Railway routes the public URL to the PORT it injects (bin defaults to 8080).
   const fedregMcpServer = service('fedreg-mcp-server', {
     // Railway builds and deploys main from GitHub.
     source: github('blen-labs/fedreg-mcp-server', { branch: 'main' }),

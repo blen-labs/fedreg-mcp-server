@@ -1,6 +1,7 @@
 # Deploying to Railway
 
-The included `deploy/Dockerfile` and `deploy/railway.toml` produce a single-process
+The included `deploy/Dockerfile` and `.railway/railway.ts` (Railway config-as-code, the only source of
+Railway service settings) produce a single-process
 HTTP MCP server with the `isolated-vm` sandbox precompiled.
 
 ## 1. Create the service
@@ -9,8 +10,9 @@ HTTP MCP server with the `isolated-vm` sandbox precompiled.
 2. **If this server lives in a subdirectory** of a larger repo (e.g. `fedreg-mcp-server/`),
    set **Settings → Source → Root Directory** to that subdirectory. All paths
    below are relative to that root.
-3. In **Settings → Build**, set the **Dockerfile path** to `deploy/Dockerfile`.
-   (Or copy `deploy/railway.toml` to the root and Railway will pick it up.)
+3. Build, deploy, healthcheck, replica and domain settings are declared in `.railway/railway.ts`
+   (Dockerfile path `deploy/Dockerfile`); apply changes with `railway config apply`. Railway no
+   longer reads `railway.toml`/`railway.json` after 2026-12-01.
 4. Railway will inject `PORT`. Our server binds to it automatically.
 5. Attach your custom domain (e.g. **`your-host.example.com`**) in **Settings →
    Networking → Custom Domains**, then add the `CNAME` Railway gives you to
