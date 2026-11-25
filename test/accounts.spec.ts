@@ -860,6 +860,10 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
         expect((await post.json() as any).error).toBe('invalid_request');
       }
     }
+    // A repeated redirect_uri is checked in full, not just its first value (Better Auth reads the last).
+    const mixed = `${query(client.redirect_uris[0])}&redirect_uri=${encodeURIComponent('http://evil.example/cb')}`;
+    expect((await authPost('authorize', mixed)).status).toBe(400);
+    expect((await fetch(`${config.origin}/api/auth/oauth2/authorize?${mixed}`, { redirect: 'manual' })).status).toBe(400);
     // A JSON body that does not parse cannot slip past the check.
     expect((await authPost('authorize', '{"redirect_uri": ', 'application/json')).status).toBe(400);
     // The registered redirect, over a JSON POST, is not mistaken for a bad one.

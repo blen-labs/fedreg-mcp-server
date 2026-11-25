@@ -61,16 +61,16 @@ function registeredRedirects(body: Buffer): unknown {
     return [];
   }
 }
-/** Fields of a POST body, whether form-encoded or JSON (either may reach Better Auth). */
-function jsonOrForm(body: Buffer): { get(name: string): string | null } {
+/** Values of a field in a POST body, whether form-encoded or JSON (either may reach Better Auth). */
+function jsonOrForm(body: Buffer): { getAll(name: string): string[] } {
   const text = body.toString('utf8').trim();
   if (text.startsWith('{')) {
     try {
       const fields = JSON.parse(text) as Record<string, unknown>;
-      return { get: name => { const v = fields[name]; return v === undefined || v === null ? null : String(v); } };
+      return { getAll: name => { const v = fields[name]; return v === undefined || v === null ? [] : [String(v)]; } };
     } catch {
       // Not parseable: a value no redirect check accepts, so the request is refused here.
-      return { get: () => 'invalid' };
+      return { getAll: () => ['invalid'] };
     }
   }
   return new URLSearchParams(text);
@@ -467,12 +467,12 @@ export async function createAccountApp(
         req.path === '/oauth2/register' && Buffer.isBuffer(body)
           ? registeredRedirects(body)
           : req.path === '/oauth2/authorize'
-            ? [
-                (req.method === 'POST' && Buffer.isBuffer(body)
-                  ? jsonOrForm(body)
-                  : authUrl.searchParams
-                ).get('redirect_uri'),
-              ].filter(Boolean)
+            // Every value is checked: a repeated field is read by Better Auth as its last value,
+            // which the first one alone would not show.
+            ? (req.method === 'POST' && Buffer.isBuffer(body)
+                ? jsonOrForm(body)
+                : authUrl.searchParams
+              ).getAll('redirect_uri').filter(Boolean)
             : [];
       if (!Array.isArray(redirects) || !redirects.every(allowedRedirect))
         return res.status(400).json({

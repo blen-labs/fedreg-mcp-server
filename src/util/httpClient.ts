@@ -353,7 +353,7 @@ async function readCapped(
       if (isError) break;
       throw new ResponseTooLargeError(what, reportedMax);
     }
-    chunks.push(Buffer.from(chunk));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
 }

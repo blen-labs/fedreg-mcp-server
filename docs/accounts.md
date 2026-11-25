@@ -72,14 +72,16 @@ These requests use a separate pool of `FEDREG_AUTH_LOCK_POOL_SIZE` connections p
 `replicas x (main pool + FEDREG_AUTH_LOCK_POOL_SIZE)` against PostgreSQL's `max_connections`. A
 waiting request holds one of them inside an open transaction (`idle in transaction`, with a 10
 second `lock_timeout`), so do not set a shorter `idle_in_transaction_session_timeout` on the role
-than that plus the slowest token response. A request that cannot get a connection or the lock
-within 10 seconds is rolled back and answered `503` with `Retry-After: 1`; the client retries.
+than that plus the slowest token response. A request that cannot get a connection within 10
+seconds, or then the lock within another 10, is rolled back and answered `503` with `Retry-After: 1`; the client retries.
 
 In memory per replica, before any lock or database lookup: each address may make 20 token or
 revoke requests a second (bursts of 600), and bearer tokens at `/mcp/account` that turn out to be
 invalid spend a budget of 2 a second (bursts of 120) per address, with at most 256 checks in
-flight. Valid tokens, database errors and other limits cost nothing against it. IPv6 addresses
-count per /64 in every per-IP limit. Past a budget the response is `429`.
+flight. Valid tokens, database errors and other limits cost nothing against it, but once an
+address has used up the budget every bearer request from it, valid or not, is answered `429`
+until it refills. IPv6 addresses count per /64 in every per-IP limit. Past a budget the response
+is `429`.
 
 ## Isolation and persistence
 
