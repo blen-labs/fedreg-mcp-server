@@ -12,10 +12,11 @@ HTTP MCP server with the `isolated-vm` sandbox precompiled.
    below are relative to that root.
 3. Build, deploy, healthcheck, replica and domain settings are declared in `.railway/railway.ts`
    (Dockerfile path `deploy/Dockerfile`); apply changes with `railway config apply`. Railway no
-   longer reads `railway.toml`/`railway.json` after 2026-12-01.
+   reads `railway.toml`/`railway.json` after 2026-12-01, so settings kept there stop applying.
 4. Railway will inject `PORT`. Our server binds to it automatically.
-5. Attach your custom domain (e.g. **`your-host.example.com`**) in **Settings →
-   Networking → Custom Domains**, then add the `CNAME` Railway gives you to
+5. Declare your custom domain (e.g. **`your-host.example.com`**) in the `domains` list of
+   `.railway/railway.ts` (not by hand in **Settings → Networking**, which the next apply would
+   revert), apply it, then add the `CNAME` Railway gives you to
    your DNS zone. Wait for the cert to provision before testing the metadata
    URL below.
 
@@ -47,7 +48,7 @@ JWKS endpoint.
 | `FEDREG_AUTH_SCOPES` | no | `mcp:read,mcp:execute` |
 
 For a quick stand-up, set `FEDREG_AUTH_PROVIDER=none` and pass the `--insecure`
-flag on the start command. **Do not do this in production.** With `--insecure` the
+flag to `startCommand` in `.railway/railway.ts`. **Do not do this in production.** With `--insecure` the
 server skips bearer-token verification entirely.
 
 ## 4. Tunables
@@ -116,6 +117,6 @@ sees a `401` with a `WWW-Authenticate` header pointing at your metadata URL.
 For personal regulations.gov keys, follow [account setup](../docs/accounts.md).
 Provision a dedicated PostgreSQL database, configure the Google callback and the
 listed secrets, and set `FEDREG_AUTH_PROVIDER=accounts`. Remove `--insecure` from
-any Railway start-command override. The image's default command already supports
+`startCommand` in `.railway/railway.ts`. The image's default command already supports
 account mode. `/health` checks database readiness. Existing public MCP clients
 will need to reconnect using OAuth after this mode is enabled.
