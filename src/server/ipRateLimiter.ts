@@ -1,5 +1,5 @@
 import type { IncomingMessage } from 'node:http';
-import { isIP, isIPv6 } from 'node:net';
+import { isIP, isIPv4, isIPv6 } from 'node:net';
 import { LRUCache } from 'lru-cache';
 
 /**
@@ -72,12 +72,15 @@ export function clientIp(req: IncomingMessage & { ip?: string }, trustedHeader?:
 
 /** The 8 groups of an IPv6 address (a dotted IPv4 tail counts as two), or undefined if it is not one. */
 function ipv6Groups(ip: string): number[] | undefined {
-  ip = ip.replace(/%.*$/, '');
+  const zone = ip.indexOf('%');
+  if (zone !== -1) ip = ip.slice(0, zone);
   if (!isIPv6(ip)) return undefined;
-  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip);
-  if (dotted) {
-    const [a, b, c, d] = dotted.slice(1).map(Number) as [number, number, number, number];
-    ip = `${ip.slice(0, dotted.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  const cut = ip.lastIndexOf(':') + 1;
+  const last = ip.slice(cut);
+  if (last.includes('.')) {
+    if (!isIPv4(last)) return undefined;
+    const [a, b, c, d] = last.split('.').map(Number) as [number, number, number, number];
+    ip = `${ip.slice(0, cut)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
   }
   const [head = '', tail] = ip.split('::');
   const first = head ? head.split(':') : [];

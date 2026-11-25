@@ -59,7 +59,7 @@ hosting or a different proxy chain needs a corresponding trust-proxy review.
 
 ## OAuth token locks and request budgets
 
-`/oauth2/token` and `/oauth2/revoke` serialize per refresh family (one client and user) with a
+`/oauth2/token` and `/oauth2/revoke` serialize per user with a
 transaction-scoped PostgreSQL advisory lock, so refresh rotation and replay invalidation never
 interleave across replicas. The lock follows the operation Better Auth runs: only form-encoded
 bodies are accepted, a repeated field takes its last value (a conflicting repeat of `grant_type`

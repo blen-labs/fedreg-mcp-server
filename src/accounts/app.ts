@@ -38,9 +38,12 @@ const FORM = 'application/x-www-form-urlencoded';
 /** PostgreSQL's lock_not_available (lock_timeout) or the pool's connection wait running out. */
 const isLockWaitTimeout = (error: unknown) =>
   (error as { code?: string })?.code === '55P03' ||
-  /timeout exceeded when trying to connect/i.test(String((error as Error)?.message));
-/** The lock key of a refresh family, which is every refresh token of one (client, user). */
-export const familyLockKey = (clientId: string, userId: string) => `family:${clientId}:${userId}`;
+  /timeout exceeded when trying to connect|Connection terminated due to connection timeout/i.test(String((error as Error)?.message));
+/**
+ * The lock key of a user's tokens. Unchanged from the key earlier releases took, so instances of
+ * both versions running side by side during a rollout still serialize on the same lock.
+ */
+export const userLockKey = (userId: string) => `user:${userId}`;
 /** pg_advisory_xact_lock takes a signed 64-bit key. */
 export const advisoryId = (key: string) => BigInt.asIntN(64, BigInt(`0x${digest(key).slice(0, 16)}`)).toString();
 /** Failed bearer checks per address: 2 each second, bursts of 120, far below the flood guard. */
@@ -131,6 +134,8 @@ export async function createAccountApp(
     maxTokenChecksInFlight?: number;
     tokenRequestLimit?: { rps: number; burst: number };
     failedTokenLimit?: { rps: number; burst: number };
+    /** Overrides for the lock pool's connection settings (tests point it at a stalled server). */
+    lockPool?: { connectionString?: string };
   } = {},
 ): Promise<{ app: express.Express; auth: Auth; mcp: ReturnType<typeof createMcpHandler>; close: () => Promise<void> }> {
   const app = express();
@@ -145,7 +150,7 @@ export async function createAccountApp(
   await initializeAuth(auth, config, store);
   // Each waiting token request holds a connection, so size this for concurrent token requests.
   const lockWaitMs = limits.lockWaitMs ?? LOCK_WAIT_MS;
-  const locks = new Pool({ ...store.pool.options, max: config.authLockPoolSize ?? 10, connectionTimeoutMillis: lockWaitMs });
+  const locks = new Pool({ ...store.pool.options, ...limits.lockPool, max: config.authLockPoolSize ?? 10, connectionTimeoutMillis: lockWaitMs });
   locks.on('error', () => log.error('account.auth_lock_connection_error'));
   /**
    * The advisory lock for the operation Better Auth will execute for a /oauth2/token or
@@ -157,9 +162,8 @@ export async function createAccountApp(
    * Auth ignores them. Conflicting repeats of the grant or of the chosen field are refused
    * rather than guessed at.
    *
-   * A refresh family is every refresh token of one (client, user), so a presented refresh or
-   * access token locks on that pair: the same user's requests queue, other users and other
-   * clients never do. An unknown token locks on itself and a code (single-use) on itself. With
+   * A presented refresh or access token locks on its owner (`user:<id>`, the key earlier releases
+   * used, so a rolling deploy keeps one lock): the same user's requests queue, other users never do. An unknown token locks on itself and a code (single-use) on itself. With
    * nothing to serialize (client_credentials, unsupported grants, missing fields, other media
    * types) there is no lock. Tokens are stored as digests of their value.
    */
@@ -198,9 +202,9 @@ export async function createAccountApp(
     if (name === 'code') return { id: advisoryId(`code:${value}`) };
     const { adapter } = await auth.$context;
     const where = [{ field: 'token', value: digest(value) }];
-    const row = await adapter.findOne<{ userId?: string; clientId?: string }>({ model: 'oauthRefreshToken', where })
-      ?? await adapter.findOne<{ userId?: string; clientId?: string }>({ model: 'oauthAccessToken', where });
-    return { id: advisoryId(row?.userId && row.clientId ? familyLockKey(row.clientId, row.userId) : `token:${digest(value)}`) };
+    const row = await adapter.findOne<{ userId?: string }>({ model: 'oauthRefreshToken', where })
+      ?? await adapter.findOne<{ userId?: string }>({ model: 'oauthAccessToken', where });
+    return { id: advisoryId(row?.userId ? userLockKey(row.userId) : `token:${digest(value)}`) };
   };
   // Looking up the presented token costs database queries before any lock, and these routes
   // skip the page limiter, so each address gets a bounded budget sized for refresh traffic from
@@ -546,7 +550,7 @@ export async function createAccountApp(
       if (req.path !== '/oauth2/token' && req.path !== '/oauth2/revoke') return execute();
       // Serialize token-family rotation and invalidation across replicas. Better Auth's
       // current adapter performs those writes separately; overlapping requests must not
-      // interleave. A refresh and a revoke lock per (client, user) and a code exchange per code,
+      // interleave. A refresh and a revoke lock per user and a code exchange per code,
       // so unrelated users never queue together. A code exchange can still overlap a family wipe
       // for the same user; at worst that new authorization is revoked and the user authorizes again.
       if (!tokenRequests.allow(ip)) return tooMany(res);

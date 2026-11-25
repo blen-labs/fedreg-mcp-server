@@ -199,6 +199,15 @@ describe('IPv6 bucketing', () => {
     expect(bucketKey('2001:db8:0:0:0:0:102:304')).toBe('2001:db8:0:0::/64');
     expect(fromHeader('2001:DB8:0:0:1::5')).toBe(fromHeader('2001:db8::7'));
   });
+  it('canonicalizes in linear time on hostile input, and still unwraps mapped spellings', () => {
+    const timed = (fn: () => unknown) => { const t = Date.now(); fn(); return Date.now() - t; };
+    expect(timed(() => bucketKey(`fe80::1%${'z'.repeat(100_000)}`))).toBeLessThan(50);
+    expect(timed(() => bucketKey('9'.repeat(100_000)))).toBeLessThan(50);
+    expect(timed(() => bucketKey(`::ffff:${'9'.repeat(100_000)}.1`))).toBeLessThan(50);
+    expect(bucketKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64');
+    expect(bucketKey('::ffff:203.0.113.5')).toBe('203.0.113.5');
+    expect(bucketKey('0:0:0:0:0:ffff:cb00:7105')).toBe('203.0.113.5');
+  });
   it('leaves IPv4, and IPv4-mapped IPv6, as the IPv4 address', () => {
     expect(bucketKey('192.0.2.9')).toBe('192.0.2.9');
     expect(bucketKey('::ffff:192.0.2.9')).toBe('192.0.2.9');

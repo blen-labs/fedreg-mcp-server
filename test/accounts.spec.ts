@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, get as httpGet, type Server } from 'node:http';
+import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ import { MockAgent } from 'undici';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { Keyring, randomToken, digest } from '../src/accounts/crypto.js';
 import { Store, personalOwner } from '../src/accounts/store.js';
-import { createAccountApp, allowedRedirect, advisoryId, familyLockKey } from '../src/accounts/app.js';
+import { createAccountApp, allowedRedirect, advisoryId, userLockKey } from '../src/accounts/app.js';
 import { accountDependencies, publicDependencies } from '../src/accounts/runtime.js';
 import { loadAccountConfig, type AccountConfig } from '../src/accounts/config.js';
 import { checkKey } from '../src/accounts/portal.js';
@@ -727,7 +728,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   });
   it('selects the token lock from the operation Better Auth runs, and waits rather than runs unlocked', async () => {
     const issued = await token();
-    const family = advisoryId(familyLockKey(issued.clientId, alice.id));
+    const family = advisoryId(userLockKey(alice.id));
     const form = (fields: Record<string, string>) => new URLSearchParams({ client_id: issued.clientId, ...fields }).toString();
     // Revoke acts on `token`, wherever decoy refresh_token fields appear.
     const revoke = await holding(family, () => authPost('revoke', `refresh_token=junk&${form({ token: issued.refresh_token })}&refresh_token=junk2`));
@@ -735,7 +736,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(revoke.response.status).toBe(200);
     // Revoke with an access token (even with its scheme prefix) locks the same family.
     const second = await token();
-    const secondFamily = advisoryId(familyLockKey(second.clientId, alice.id));
+    const secondFamily = advisoryId(userLockKey(alice.id));
     const prefixed = await holding(secondFamily, () => authPost('revoke', form({ token: `Bearer ${second.access_token}`, token_type_hint: 'access_token' })));
     expect(prefixed.waits).toBe(true);
     expect(prefixed.response.status).toBe(200);
@@ -748,7 +749,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       ['last value wins', (t: string) => `${form({ grant_type: 'refresh_token', refresh_token: t })}&refresh_token=${t}`],
     ] as const) {
       const fresh = await token();
-      const waited = await holding(advisoryId(familyLockKey(fresh.clientId, alice.id)), () => authPost('token', build(fresh.refresh_token)));
+      const waited = await holding(advisoryId(userLockKey(alice.id)), () => authPost('token', build(fresh.refresh_token)));
       if (name === 'BOM') {
         // The selector reads the body with the runtime parser Better Auth uses, so whichever way this runtime
         // treats a BOM they agree: either the request waited for the lock, or Better Auth did not run a grant.
@@ -761,13 +762,13 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     }
     // Bodies the runtime's form parser accepts differently from a naive one (a leading '?') still take their lock.
     const questioned = await token();
-    const qFamily = advisoryId(familyLockKey(questioned.clientId, alice.id));
+    const qFamily = advisoryId(userLockKey(alice.id));
     for (const [name, build] of [
       ['? refresh', (t: string) => `?${form({ grant_type: 'refresh_token', refresh_token: t })}`],
       ['? grant first', (t: string) => `?grant_type=refresh_token&refresh_token=${t}&client_id=${questioned.clientId}`],
     ] as const) {
       const fresh = await token();
-      const waited = await holding(advisoryId(familyLockKey(fresh.clientId, alice.id)), () => authPost('token', build(fresh.refresh_token)));
+      const waited = await holding(advisoryId(userLockKey(alice.id)), () => authPost('token', build(fresh.refresh_token)));
       expect(waited.waits, name).toBe(true);
       expect(waited.response.status, name).toBeLessThan(500);
     }
@@ -789,10 +790,10 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect(exchanged.response.status, await exchanged.response.clone().text()).toBe(200);
     // The grant picks the field: a client_credentials request with a refresh_token takes no lock.
     const third = await token();
-    const unrelated = await holding(advisoryId(familyLockKey(third.clientId, alice.id)), () => authPost('token', form({ grant_type: 'client_credentials', refresh_token: third.refresh_token })));
+    const unrelated = await holding(advisoryId(userLockKey(alice.id)), () => authPost('token', form({ grant_type: 'client_credentials', refresh_token: third.refresh_token })));
     expect(unrelated.waits).toBe(false);
     // Other media types are refused by Better Auth and take no lock.
-    const json = await holding(advisoryId(familyLockKey(third.clientId, alice.id)), () => authPost('token', JSON.stringify({ grant_type: 'refresh_token', refresh_token: third.refresh_token, client_id: third.clientId }), 'application/json'));
+    const json = await holding(advisoryId(userLockKey(alice.id)), () => authPost('token', JSON.stringify({ grant_type: 'refresh_token', refresh_token: third.refresh_token, client_id: third.clientId }), 'application/json'));
     expect(json.waits).toBe(false);
     expect(json.response.status).toBe(415);
     // Revoke acts on `token` whatever grant_type or code fields ride along: a decoy grant never moves the lock.
@@ -802,16 +803,16 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       ['conflicting grant_type repeats', 'grant_type=client_credentials&grant_type=refresh_token&refresh_token=decoy'],
     ] as const) {
       const victim = await token();
-      const revoked = await holding(advisoryId(familyLockKey(victim.clientId, alice.id)), () => authPost('revoke', `${extra}&${form({ token: victim.refresh_token })}`));
+      const revoked = await holding(advisoryId(userLockKey(alice.id)), () => authPost('revoke', `${extra}&${form({ token: victim.refresh_token })}`));
       expect(revoked.waits, name).toBe(true);
       expect(revoked.response.status, name).toBe(200);
     }
     // A /token request with no grant_type takes no lock, even with a `token` field.
     const bare = await token();
-    const noGrant = await holding(advisoryId(familyLockKey(bare.clientId, alice.id)), () => authPost('token', form({ token: bare.refresh_token })));
+    const noGrant = await holding(advisoryId(userLockKey(alice.id)), () => authPost('token', form({ token: bare.refresh_token })));
     expect(noGrant.waits).toBe(false);
     // A JSON revoke of a real refresh token is refused (Better Auth takes form bodies only), not run unlocked.
-    const jsonRevoke = await holding(advisoryId(familyLockKey(bare.clientId, alice.id)), () => authPost('revoke', JSON.stringify({ token: bare.refresh_token, client_id: bare.clientId }), 'application/json'));
+    const jsonRevoke = await holding(advisoryId(userLockKey(alice.id)), () => authPost('revoke', JSON.stringify({ token: bare.refresh_token, client_id: bare.clientId }), 'application/json'));
     expect(jsonRevoke.waits).toBe(false);
     expect(jsonRevoke.response.status).toBe(415);
     expect((await exchange(bare.clientId, { grant_type: 'refresh_token', refresh_token: bare.refresh_token })).status).toBe(200);
@@ -828,13 +829,43 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     ]);
     expect(results.map(r => r.status).every(status => status < 500), results.map(r => r.status).join()).toBe(true);
   });
+  it('keeps the lock keys earlier releases used, so old and new instances share one lock during a rollout', async () => {
+    // The base release's computation, written out independently of the app's helper.
+    const base = (key: string) => BigInt.asIntN(64, BigInt(`0x${digest(key).slice(0, 16)}`)).toString();
+    const issued = await token();
+    expect(advisoryId(userLockKey(alice.id))).toBe(base(`user:${alice.id}`));
+    expect(advisoryId(`code:abc`)).toBe(base('code:abc'));
+    expect(advisoryId(`token:${digest('x')}`)).toBe(base(`token:${digest('x')}`));
+    // And a refresh really waits on that key.
+    const held = await holding(base(`user:${alice.id}`), () => authPost('token', new URLSearchParams({ client_id: issued.clientId, grant_type: 'refresh_token', refresh_token: issued.refresh_token })));
+    expect(held.waits).toBe(true);
+    expect(held.response.status).toBe(200);
+  });
+  it('answers a lock connection that cannot be established in time with 503, running no OAuth handler', async () => {
+    const issued = await token();
+    const sockets = new Set<import('node:net').Socket>();
+    // Accepts, never completes the PostgreSQL handshake.
+    const stalled = createNetServer(socket => { sockets.add(socket); socket.on('error', () => undefined); });
+    await new Promise<void>(resolve => stalled.listen(0, '127.0.0.1', resolve));
+    try {
+      const replica = await build({}, { lockWaitMs: 300, lockPool: { connectionString: `postgresql://u:p@127.0.0.1:${(stalled.address() as AddressInfo).port}/db` } });
+      await onReplica(replica, async () => {
+        const response = await authPost('token', new URLSearchParams({ client_id: issued.clientId, grant_type: 'refresh_token', refresh_token: issued.refresh_token }));
+        expect(response.status).toBe(503);
+        expect(response.headers.get('retry-after')).toBe('1');
+      });
+    } finally { for (const socket of sockets) socket.destroy();
+      await new Promise(resolve => stalled.close(resolve)); }
+    // No handler ran: the refresh token was not rotated.
+    expect((await exchange(issued.clientId, { grant_type: 'refresh_token', refresh_token: issued.refresh_token })).status).toBe(200);
+  });
   it('refuses a conflicting repeated grant_type before it can run an unlocked grant', async () => {
     const issued = await token();
     const flow = await authorize();
     const hold = await pool.connect();
     try {
       await hold.query('BEGIN');
-      await hold.query('SELECT pg_advisory_xact_lock($1)', [advisoryId(familyLockKey(issued.clientId, alice.id))]);
+      await hold.query('SELECT pg_advisory_xact_lock($1)', [advisoryId(userLockKey(alice.id))]);
       await hold.query('SELECT pg_advisory_xact_lock($1)', [advisoryId(`code:${flow.code}`)]);
       const send = (client: string, fields: [string, string][]) => authPost('token', new URLSearchParams([['client_id', client], ...fields]));
       const refresh = await send(issued.clientId, [['grant_type', 'client_credentials'], ['grant_type', 'refresh_token'], ['refresh_token', issued.refresh_token]]);
@@ -850,7 +881,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   });
   it('answers a stuck token lock or an exhausted lock pool with a retryable 503, rolls back, and recovers', async () => {
     const issued = await token();
-    const family = advisoryId(familyLockKey(issued.clientId, alice.id));
+    const family = advisoryId(userLockKey(alice.id));
     const refresh = () => authPost('token', new URLSearchParams({ client_id: issued.clientId, grant_type: 'refresh_token', refresh_token: issued.refresh_token }));
     // Pool of two, short waits: two requests time out on the lock, the third on the connection.
     const replica = await build({ authLockPoolSize: 2 }, { lockWaitMs: 300 });
