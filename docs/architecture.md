@@ -296,6 +296,6 @@ schema/
   regs.json                # regulations.gov endpoint + field corpus
 test/                      # vitest specs
 examples/                  # snippets you can paste into `execute`
-deploy/                    # Dockerfile, railway.toml, RAILWAY.md
+deploy/                    # Dockerfile, RAILWAY.md (Railway settings live in .railway/railway.ts)
 docs/                      # this file, sdk-reference.md, migration-v2.md, migration-v3.md, migration-v4.md, release-notes/
 ```
