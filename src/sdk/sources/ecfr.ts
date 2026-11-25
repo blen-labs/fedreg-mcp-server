@@ -3,11 +3,18 @@ import { EcfrClient } from '../ecfr-client.js';
 import { loadSourceCorpus } from './corpus-loader.js';
 import type { Source, SourceConfig } from './source.js';
 
+/**
+ * eCFR full-text XML is large: Title 40 is about 157 MB decompressed (25 MB gzipped) as of
+ * 2026-11, and the other titles are smaller. The limit leaves headroom above the largest title so
+ * a legitimate whole-title request works; anything bigger fails with ResponseTooLarge, never truncated.
+ */
+export const ECFR_MAX_RESPONSE_BYTES = 192 * 1024 * 1024;
+
 export function createEcfrSource(cfg: SourceConfig): Source {
   const http = new HttpClient({
     baseUrl: cfg.ecfrBaseUrl, userAgent: cfg.userAgent, timeoutMs: cfg.timeoutMs,
     retries: cfg.retries, cacheTtlMs: cfg.cacheTtlMs, cacheMaxItems: cfg.cacheMaxItems,
-    label: 'eCFR API',
+    label: 'eCFR API', maxResponseBytes: ECFR_MAX_RESPONSE_BYTES,
     ...(cfg.ecfrGate ? { gate: cfg.ecfrGate } : {}),
     ...(cfg.dispatcher ? { dispatcher: cfg.dispatcher } : {}),
   });

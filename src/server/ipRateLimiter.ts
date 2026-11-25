@@ -1,4 +1,5 @@
 import type { IncomingMessage } from 'node:http';
+import { isIP } from 'node:net';
 import { LRUCache } from 'lru-cache';
 
 /**
@@ -17,19 +18,35 @@ export class IpRateLimiter {
     this.buckets = new LRUCache({ max: 50_000, ttl });
   }
 
+  /** Spends a token; false when the address is out of them. */
   allow(ip: string): boolean {
+    const key = bucketKey(ip);
+    const b = this.refilled(key);
+    const allowed = b.tokens >= 1;
+    if (allowed) b.tokens -= 1;
+    this.buckets.set(key, b);
+    return allowed;
+  }
+
+  /** True when the address has a token left; spends nothing. */
+  available(ip: string): boolean {
+    return this.refilled(bucketKey(ip)).tokens >= 1;
+  }
+
+  /** Spends a token even when none is left (the balance floors at zero). */
+  spend(ip: string): void {
+    const key = bucketKey(ip);
+    const b = this.refilled(key);
+    b.tokens = Math.max(0, b.tokens - 1);
+    this.buckets.set(key, b);
+  }
+
+  private refilled(key: string) {
     const now = Date.now();
-    const b = this.buckets.get(ip) ?? { tokens: this.burst, updatedAt: now };
-    const elapsedSec = (now - b.updatedAt) / 1000;
-    b.tokens = Math.min(this.burst, b.tokens + elapsedSec * this.rps);
+    const b = this.buckets.get(key) ?? { tokens: this.burst, updatedAt: now };
+    b.tokens = Math.min(this.burst, b.tokens + ((now - b.updatedAt) / 1000) * this.rps);
     b.updatedAt = now;
-    if (b.tokens < 1) {
-      this.buckets.set(ip, b);
-      return false;
-    }
-    b.tokens -= 1;
-    this.buckets.set(ip, b);
-    return true;
+    return b;
   }
 }
 
@@ -42,16 +59,46 @@ export class IpRateLimiter {
  * X-Forwarded-For as "<client>, <edge>", so that header's rightmost entry is NOT the client).
  * For a list-valued header the rightmost entry, the one the nearest proxy added, is used.
  */
-export function clientIp(req: IncomingMessage, trustedHeader?: string): string {
-  const peer = normalize(req.socket.remoteAddress ?? 'unknown');
+export function clientIp(req: IncomingMessage & { ip?: string }, trustedHeader?: string): string {
+  const peer = normalize(req.ip ?? req.socket.remoteAddress ?? 'unknown');
   if (!trustedHeader) return peer;
   const value = req.headers[trustedHeader.toLowerCase()];
   const entries = (Array.isArray(value) ? value.join(',') : value ?? '')
     .split(',').map(s => s.trim()).filter(Boolean);
   const candidate = entries[entries.length - 1];
-  return candidate ? normalize(candidate) : peer;
+  // Only a literal address becomes a bucket key; anything else is not a client address.
+  return candidate && isIP(normalize(candidate)) ? normalize(candidate) : peer;
 }
 
+/**
+ * The bucket an address is counted in. An IPv6 customer controls a whole /64 (and usually far
+ * more), so counting single addresses would let one host mint endless fresh buckets. IPv4-mapped
+ * IPv6 addresses count as the IPv4 address.
+ */
+export function bucketKey(ip: string): string {
+  ip = normalize(ip);
+  if (!ip.includes(':')) return ip;
+  const [head = '', tail, extra] = ip.split('::');
+  if (extra !== undefined) return ip;
+  const groups = head ? head.split(':') : [];
+  if (tail !== undefined) {
+    const rest = tail ? tail.split(':') : [];
+    while (groups.length + rest.length < 8) groups.push('0');
+    groups.push(...rest);
+  }
+  if (groups.length !== 8) return ip;
+  return `${groups.slice(0, 4).map(g => g.toLowerCase().replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
+
+/** Drops a zone id and unwraps IPv4-mapped IPv6 (`::ffff:1.2.3.4` and `::ffff:102:304`). */
 function normalize(ip: string): string {
-  return ip.replace(/^::ffff:/, '');
+  ip = ip.replace(/%.*$/, '');
+  const dotted = /^(?:0{0,4}:){0,5}ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
+  if (dotted) return dotted[1]!;
+  const hex = /^(?:0{0,4}:){0,5}ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i.exec(ip);
+  if (hex) {
+    const hi = parseInt(hex[1]!, 16), lo = parseInt(hex[2]!, 16);
+    return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  }
+  return ip;
 }
