@@ -12,7 +12,7 @@ HTTP MCP server with the `isolated-vm` sandbox precompiled.
    below are relative to that root.
 3. Build, deploy, healthcheck, replica and domain settings are declared in `.railway/railway.ts`
    (Dockerfile path `deploy/Dockerfile`); apply changes with `railway config apply`. Railway no
-   reads `railway.toml`/`railway.json` after 2026-12-01, so settings kept there stop applying.
+   longer reads `railway.toml`/`railway.json` after 2026-12-01, so settings kept there stop applying.
 4. Railway will inject `PORT`. Our server binds to it automatically.
 5. Declare your custom domain (e.g. **`your-host.example.com`**) in the `domains` list of
    `.railway/railway.ts` (not by hand in **Settings → Networking**, which the next apply would
@@ -107,7 +107,7 @@ sees a `401` with a `WWW-Authenticate` header pointing at your metadata URL.
 
 - The build stage compiles `isolated-vm` from source (~2 min on first build,
   cached on rebuilds with `--cache-from`).
-- The runtime image is `node:22-bookworm-slim` + `libstdc++`. No Python, no
+- The runtime image is `node:26-trixie-slim` + `libstdc++`. No Python, no
   toolchain — about 220 MB.
 - `dumb-init` is the PID 1 so signals are forwarded cleanly. The server handles
   `SIGTERM`/`SIGINT`, aborts in-flight MCP exchanges, then closes the listener.
