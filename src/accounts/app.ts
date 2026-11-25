@@ -173,7 +173,7 @@ export async function createAccountApp(
     // runtime quirk (a leading '?' or BOM, percent-decoding) reads the same here as there.
     let form: FormData;
     try {
-      form = await new Request('http://localhost/', { method: 'POST', headers: { 'content-type': contentType! }, body }).formData();
+      form = await new Request('http://localhost/', { method: 'POST', headers: { 'content-type': contentType! }, body: new Uint8Array(body) }).formData();
     } catch {
       return { reject: true };
     }
