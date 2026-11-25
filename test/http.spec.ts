@@ -190,6 +190,15 @@ describe('IPv6 bucketing', () => {
     expect(bucketKey('2001:db8:1:3::1')).not.toBe(key);
     expect(bucketKey('::1')).toBe('0:0:0:0::/64');
   });
+  it('treats every spelling of an IPv4-mapped address as the IPv4 client, through the composed header-to-key path', () => {
+    const fromHeader = (value: string) => bucketKey(clientIp({ socket: { remoteAddress: '100.64.0.2' }, headers: { 'x-real-ip': value } } as unknown as IncomingMessage, 'x-real-ip'));
+    for (const spelling of ['203.0.113.5', '::ffff:203.0.113.5', '::FFFF:203.0.113.5', '::ffff:cb00:7105', '::FFFF:CB00:7105', '0:0:0:0:0:ffff:cb00:7105', '0000:0000:0000:0000:0000:ffff:cb00:7105', '0:0:0:0:0:ffff:203.0.113.5', '::0:ffff:cb00:7105'])
+      expect(fromHeader(spelling), spelling).toBe('203.0.113.5');
+    // A mixed notation that is not IPv4-mapped is a /64 like any other IPv6 address.
+    expect(fromHeader('2001:db8::1.2.3.4')).toBe('2001:db8:0:0::/64');
+    expect(bucketKey('2001:db8:0:0:0:0:102:304')).toBe('2001:db8:0:0::/64');
+    expect(fromHeader('2001:DB8:0:0:1::5')).toBe(fromHeader('2001:db8::7'));
+  });
   it('leaves IPv4, and IPv4-mapped IPv6, as the IPv4 address', () => {
     expect(bucketKey('192.0.2.9')).toBe('192.0.2.9');
     expect(bucketKey('::ffff:192.0.2.9')).toBe('192.0.2.9');

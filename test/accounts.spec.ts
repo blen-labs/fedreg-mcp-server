@@ -589,7 +589,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     for (const ip of ['2001:db8:1:2::1', '2001:db8:1:2:ffff::9', '2001:0DB8:1:2:0:0:0:3']) await mcpPost('nope', { 'x-real-ip': ip });
     expect(await bucketCount('mcp-ip:2001:db8:1:2::/64')).toBe(3);
     await mcpPost('nope', { 'x-real-ip': '::ffff:192.0.2.9' });
-    expect(await bucketCount('mcp-ip:192.0.2.9')).toBe(1);
+    await mcpPost('nope', { 'x-real-ip': '0:0:0:0:0:FFFF:c000:209' });
+    expect(await bucketCount('mcp-ip:192.0.2.9')).toBe(2);
   });
   it('accepts the Bearer scheme in any letter case (RFC 6750) and still refuses other schemes', async () => {
     const a = await token();
@@ -748,10 +749,37 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     ] as const) {
       const fresh = await token();
       const waited = await holding(advisoryId(familyLockKey(fresh.clientId, alice.id)), () => authPost('token', build(fresh.refresh_token)));
+      if (name === 'BOM') {
+        // The selector reads the body with the runtime parser Better Auth uses, so whichever way this runtime
+        // treats a BOM they agree: either the request waited for the lock, or Better Auth did not run a grant.
+        expect(waited.waits || (await exchange(fresh.clientId, { grant_type: 'refresh_token', refresh_token: fresh.refresh_token })).status === 200, name).toBe(true);
+        continue;
+      }
       expect(waited.waits, name).toBe(true);
       // The unlocked outcome is not asserted for the odd shapes: only that the request was held.
       expect(waited.response.status, name).toBeLessThan(500);
     }
+    // Bodies the runtime's form parser accepts differently from a naive one (a leading '?') still take their lock.
+    const questioned = await token();
+    const qFamily = advisoryId(familyLockKey(questioned.clientId, alice.id));
+    for (const [name, build] of [
+      ['? refresh', (t: string) => `?${form({ grant_type: 'refresh_token', refresh_token: t })}`],
+      ['? grant first', (t: string) => `?grant_type=refresh_token&refresh_token=${t}&client_id=${questioned.clientId}`],
+    ] as const) {
+      const fresh = await token();
+      const waited = await holding(advisoryId(familyLockKey(fresh.clientId, alice.id)), () => authPost('token', build(fresh.refresh_token)));
+      expect(waited.waits, name).toBe(true);
+      expect(waited.response.status, name).toBeLessThan(500);
+    }
+    const qRevoke = await holding(qFamily, () => authPost('revoke', `?token=Bearer%20${questioned.access_token}&client_id=${questioned.clientId}&token_type_hint=access_token`));
+    expect(qRevoke.waits, '? revoke').toBe(true);
+    expect(qRevoke.response.status).toBeLessThan(500);
+    const qFlow = await authorize();
+    const qCode = await holding(advisoryId(`code:${qFlow.code}`), () => authPost('token', `?${form({
+      grant_type: 'authorization_code', code: qFlow.code!, code_verifier: qFlow.verifier, redirect_uri: qFlow.client.redirect_uris[0], client_id: qFlow.client.client_id,
+    })}`));
+    expect(qCode.waits, '? code').toBe(true);
+    expect(qCode.response.status).toBeLessThan(500);
     // A code exchange locks on its code; a stray refresh_token does not change that.
     const flow = await authorize();
     const exchanged = await holding(advisoryId(`code:${flow.code}`), () => authPost('token', form({

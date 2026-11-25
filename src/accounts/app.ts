@@ -169,10 +169,16 @@ export async function createAccountApp(
     body: Buffer | undefined,
   ): Promise<{ id?: string; reject?: true }> => {
     if (!body || contentType?.toLowerCase().split(';')[0]?.trim() !== FORM) return {};
-    // Better Auth reads the body with URLSearchParams after dropping a leading BOM.
-    const form = new URLSearchParams(body.toString('utf8').replace(/^\uFEFF/, ''));
+    // Parse with the runtime parser Better Auth (better-call) uses, Request.formData(), so any
+    // runtime quirk (a leading '?' or BOM, percent-decoding) reads the same here as there.
+    let form: FormData;
+    try {
+      form = await new Request('http://localhost/', { method: 'POST', headers: { 'content-type': contentType! }, body }).formData();
+    } catch {
+      return { reject: true };
+    }
     const field = (name: string) => {
-      const values = form.getAll(name);
+      const values = form.getAll(name).map(String);
       return values.length > 1 && new Set(values).size > 1 ? null : (values.at(-1) ?? '');
     };
     // Better Auth takes the last of a repeated field, so a conflicting repeat of the grant
