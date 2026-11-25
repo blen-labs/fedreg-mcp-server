@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, get as httpGet, type Server } from 'node:http';
-import { createServer as createNetServer, type AddressInfo } from 'node:net';
+import { createServer as createNetServer, type AddressInfo, type Socket } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -843,7 +843,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
   });
   it('answers a lock connection that cannot be established in time with 503, running no OAuth handler', async () => {
     const issued = await token();
-    const sockets = new Set<import('node:net').Socket>();
+    const sockets = new Set<Socket>();
     // Accepts, never completes the PostgreSQL handshake.
     const stalled = createNetServer(socket => { sockets.add(socket); socket.on('error', () => undefined); });
     await new Promise<void>(resolve => stalled.listen(0, '127.0.0.1', resolve));
