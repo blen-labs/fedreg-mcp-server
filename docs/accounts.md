@@ -140,7 +140,7 @@ users out of an address. Access tokens are issued in an authenticated format,
 (HKDF with the info string `fedreg-access-token-mac/<kid>`, so each key ID has its own key) over the rest of
 the token. `/mcp/account` admits a token in this order:
 
-1. A value with the `at1.` prefix and a wrong shape, unknown key ID or bad MAC is `401` with no database
+1. A value without the `at1.` prefix, or with it and a wrong shape, unknown key ID or bad MAC, is `401` with no database
    work, no flood allowance and no in-flight slot. Parsing is strict and the MAC is compared in constant time.
 2. A MAC-valid token older than `issued-at + 15 minutes + 60 s` is `401` with no database work. The 60 s is
    clock skew for this cheap bound only; the database expiry stays authoritative and never gains the skew.
