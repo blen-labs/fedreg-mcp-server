@@ -50,7 +50,7 @@ export const MAX_TOOL_INPUT_ELEMENTS = 16;
 
 export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpServer {
   const server = new McpServer(
-    { name: 'fedreg-mcp-server', version: '4.0.1' }, // x-release-version
+    { name: 'fedreg-mcp-server', version: '4.0.2' }, // x-release-version
     {
       capabilities: { tools: {} },
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,

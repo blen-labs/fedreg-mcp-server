@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.0.2] - 2026-11-26
+
+### Fixed
+- announce the footer heart once (a11y)
+
+### Changed
+- sign "Built with ❤️ by BLEN" and add a teams call to action
+
 ## [4.0.1] - 2026-11-26
 
 ### Fixed
@@ -384,7 +392,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.1...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.2...HEAD
+[4.0.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.1...v4.0.2
 [4.0.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.0
 [4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v3.0.0...v4.0.0
