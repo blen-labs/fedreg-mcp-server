@@ -40,7 +40,7 @@ pnpm typecheck                  # tsc --noEmit (src, test, web, web/e2e)
 pnpm lint                       # eslint: correctness and security rules, type-aware in src/
 pnpm test:web                   # Playwright + axe: portal and docs accessibility (builds both first)
 pnpm kit:check                  # the shared portal kit matches web/portal-kit.json
-pnpm docs:check                 # every code fence in the README, docs/ and site pages names a language
+pnpm docs:check                 # every code fence in the Markdown docs names a language
 pnpm dev                        # tsx src/bin.ts (stdio)
 pnpm dev --http --insecure      # local HTTP, no auth, bound to 127.0.0.1
 pnpm build                      # tsc + Vite (dist/web) + chmod

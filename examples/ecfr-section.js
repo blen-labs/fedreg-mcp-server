@@ -1,14 +1,14 @@
 // Paste into the `execute` tool. The current text of one eCFR section, plus the newest
-// Federal Register rules on the same subject, so an answer can cite both.
+// Federal Register rules that affect the same part, so an answer can cite both.
 
 // 1. The eCFR is versioned by date: ask for the title's latest issue date, then that day's section.
 const { titles } = await ecfr.titles.list();
 const date = titles.find(t => t.number === 50).latest_issue_date;
 const xml = await ecfr.full(date, 50, { part: '21', section: '21.150' });
 
-// 2. Related rulemaking in the Federal Register.
+// 2. The newest Federal Register rules and proposed rules that affect the same CFR part.
 const rules = await fr.documents.search({
-  conditions: { term: 'migratory bird depredation', type: ['RULE', 'PRORULE'] },
+  conditions: { cfr: { title: 50, part: 21 }, type: ['RULE', 'PRORULE'] },
   fields: ['document_number', 'title', 'publication_date', 'html_url'],
   per_page: 3,
   order: 'newest',

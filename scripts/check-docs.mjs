@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-/** The authored documentation: the READMEs, docs/ and the site's pages (reference/sdk.md is generated from docs/sdk-reference.md). */
+/** The authored documentation: the root Markdown files, deploy/RAILWAY.md, docs/ and the site's pages (reference/sdk.md is generated from docs/sdk-reference.md). */
 export function docFiles(root = '.') {
   const walk = (dir) =>
     readdirSync(join(root, dir), { withFileTypes: true }).flatMap((entry) => {
@@ -13,7 +13,8 @@ export function docFiles(root = '.') {
       if (entry.isDirectory()) return walk(path);
       return /\.mdx?$/.test(entry.name) ? [path] : [];
     });
-  return ['README.md', 'examples/README.md', ...walk('docs'), ...walk('site/src/content/docs')].filter(
+  const rootFiles = readdirSync(root).filter((name) => /\.md$/.test(name) && name !== 'release-notes.generated.md');
+  return [...rootFiles, 'examples/README.md', 'deploy/RAILWAY.md', ...walk('docs'), ...walk('site/src/content/docs')].filter(
     (file) => file !== 'site/src/content/docs/reference/sdk.md',
   );
 }

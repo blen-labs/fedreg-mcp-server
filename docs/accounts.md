@@ -152,11 +152,14 @@ To retire an encryption key:
    It re-encrypts every stored credential that is not under the active key, in batches of 100
    (`Store.rotateAllKeys`), and records a `credential.reencrypted` audit event per row. A row
    that cannot be opened (its key ID is no longer in `ENCRYPTION_KEYS_JSON`, or it is damaged) is
-   left as it was and recorded as `credential.reencrypt_failed`; the run continues with the next
-   row.
+   left as it was; the run continues with the next row. Like a normal start, the command creates
+   or updates the tables first, and it accepts no server options (`--http`, `--insecure` and
+   `--port` are refused). Each failed row gets one `credential.reencrypt_failed:<reason>:<key ID>`
+   audit event, written once per owner, reason and key ID, so scheduled reruns do not grow the
+   audit table.
 4. Check the result. The command logs `accounts.keys_rotated` with the active key ID, the number
    of rows rotated and the number that failed, and one `accounts.key_rotation_failed` line with
-   the owner for each failed row; it never logs key material. It exits 0 when every row was migrated and
+   the owner and a coarse reason (`unknown_key`, `authentication` or `other`) for each failed row; it never logs key material. It exits 0 when every row was migrated and
    1 when any row failed, so a script can stop before step 5. It is safe to run again: rows
    already under the active key are skipped.
 5. Remove the old key from `ENCRYPTION_KEYS_JSON` only when the command exits 0 and every backup

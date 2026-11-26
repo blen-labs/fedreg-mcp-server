@@ -64,22 +64,22 @@ Requires **Node.js 24 or 26** (LTS). `npx` downloads and runs the server on dema
 
 ## See it in action
 
-> *"What does 50 CFR 21.150 cover, and have there been recent Federal Register rules touching migratory-bird depredation?"*
+> *"What does 50 CFR 21.150 cover, and which recent Federal Register rules changed 50 CFR part 21?"*
 
 The model finds the right calls with `search_api` and runs them in the sandbox — no hand-written tool per endpoint. This is [`examples/ecfr-section.js`](./examples/ecfr-section.js), which the test suite runs in the sandbox:
 
 ```js
 // Paste into the `execute` tool. The current text of one eCFR section, plus the newest
-// Federal Register rules on the same subject, so an answer can cite both.
+// Federal Register rules that affect the same part, so an answer can cite both.
 
 // 1. The eCFR is versioned by date: ask for the title's latest issue date, then that day's section.
 const { titles } = await ecfr.titles.list();
 const date = titles.find(t => t.number === 50).latest_issue_date;
 const xml = await ecfr.full(date, 50, { part: '21', section: '21.150' });
 
-// 2. Related rulemaking in the Federal Register.
+// 2. The newest Federal Register rules and proposed rules that affect the same CFR part.
 const rules = await fr.documents.search({
-  conditions: { term: 'migratory bird depredation', type: ['RULE', 'PRORULE'] },
+  conditions: { cfr: { title: 50, part: 21 }, type: ['RULE', 'PRORULE'] },
   fields: ['document_number', 'title', 'publication_date', 'html_url'],
   per_page: 3,
   order: 'newest',
@@ -109,22 +109,22 @@ It returns this (a real run on 2026-11-26 against the eCFR and Federal Register 
   },
   "rules": [
     {
-      "document_number": "2026-17733",
-      "title": "Process for Authorizing Seasonal Migratory Game Bird Hunting",
-      "publication_date": "2026-08-31",
-      "html_url": "https://www.federalregister.gov/documents/2026/08/31/2026-17733/process-for-authorizing-seasonal-migratory-game-bird-hunting"
+      "document_number": "2026-20123",
+      "title": "General Provisions; Revised List of Birds Protected by the Migratory Bird Treaty Act",
+      "publication_date": "2026-10-01",
+      "html_url": "https://www.federalregister.gov/documents/2026/10/01/2026-20123/general-provisions-revised-list-of-birds-protected-by-the-migratory-bird-treaty-act"
     },
     {
-      "document_number": "2026-14550",
-      "title": "Endangered and Threatened Wildlife and Plants; Reclassification of the Hawaiian Stilt (Kukuluae'o or Ae'o) From Endangered to Threatened With a Section 4(d) Rule",
-      "publication_date": "2026-07-20",
-      "html_url": "https://www.federalregister.gov/documents/2026/07/20/2026-14550/endangered-and-threatened-wildlife-and-plants-reclassification-of-the-hawaiian-stilt-kukuluaeo-or"
+      "document_number": "2025-06782",
+      "title": "Migratory Bird Permits; Authorizing the Incidental Take of Migratory Birds; Withdrawal",
+      "publication_date": "2025-04-21",
+      "html_url": "https://www.federalregister.gov/documents/2025/04/21/2025-06782/migratory-bird-permits-authorizing-the-incidental-take-of-migratory-birds-withdrawal"
     },
     {
-      "document_number": "2026-12955",
-      "title": "Process for Authorizing Seasonal Migratory Game Bird Hunting",
-      "publication_date": "2026-06-26",
-      "html_url": "https://www.federalregister.gov/documents/2026/06/26/2026-12955/process-for-authorizing-seasonal-migratory-game-bird-hunting"
+      "document_number": "2024-31015",
+      "title": "Regulatory Authorizations for Migratory Bird and Eagle Possession by the General Public, Educators, and Government Agencies",
+      "publication_date": "2024-12-31",
+      "html_url": "https://www.federalregister.gov/documents/2024/12/31/2024-31015/regulatory-authorizations-for-migratory-bird-and-eagle-possession-by-the-general-public-educators"
     }
   ]
 }

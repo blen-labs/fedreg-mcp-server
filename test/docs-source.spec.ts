@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -14,8 +14,8 @@ describe('code fences', () => {
     expect(fences(source).map(({ line, lang }) => [line, lang])).toEqual([[1, ''], [5, 'js'], [8, 'text'], [11, 'md'], [16, '']]);
   });
 
-  it('are labelled in the README, docs/, and the authored pages of the site', () => {
-    expect(docFiles()).toEqual(expect.arrayContaining(['README.md', 'docs/architecture.md', 'site/src/content/docs/self-host.mdx']));
+  it('are labelled in the root Markdown files, deploy/, docs/, and the authored pages of the site', () => {
+    expect(docFiles()).toEqual(expect.arrayContaining(['README.md', 'CLAUDE.md', 'CONTRIBUTING.md', 'deploy/RAILWAY.md', 'docs/architecture.md', 'site/src/content/docs/self-host.mdx']));
     expect(unlabelledFences()).toEqual([]);
   });
 });
@@ -27,15 +27,16 @@ describe.each(['/bin/bash', '/bin/zsh'].filter(existsSync))('documented shell te
     fences(read(file)).filter((fence) => /^(bash|sh|shell|zsh)$/.test(fence.lang)).map((fence) => [`${file}:${fence.line}`, fence.body] as const),
   );
 
-  it('documents at least the local and OIDC start commands', () => {
-    expect(blocks.length).toBeGreaterThanOrEqual(3);
+  it('documents the start commands, the rotation command and the deploy checks', () => {
+    expect(blocks.length).toBeGreaterThanOrEqual(8);
   });
 
   it.each(blocks)('%s runs to the server invocation', (_where, body) => {
     const dir = mkdtempSync(join(tmpdir(), 'docs-shell-'));
     const log = join(dir, 'calls.log');
     // The only commands on PATH: each records its arguments and its environment.
-    for (const name of ['npx', 'node', 'pnpm', 'docker']) {
+    mkdirSync(join(dir, 'site'));
+    for (const name of ['npx', 'node', 'pnpm', 'docker', 'curl', 'jq']) {
       const stub = join(dir, name);
       writeFileSync(stub, `#!/bin/sh\n{ echo "CALL ${name} $*"; /usr/bin/env; } >> "${log}"\n`);
       chmodSync(stub, 0o755);
