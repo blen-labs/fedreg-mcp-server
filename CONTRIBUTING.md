@@ -40,6 +40,7 @@ pnpm typecheck                  # tsc --noEmit (src, test, web, web/e2e)
 pnpm lint                       # eslint: correctness and security rules, type-aware in src/
 pnpm test:web                   # Playwright + axe: portal and docs accessibility (builds both first)
 pnpm kit:check                  # the shared portal kit matches web/portal-kit.json
+pnpm docs:check                 # every code fence in the README, docs/ and site pages names a language
 pnpm dev                        # tsx src/bin.ts (stdio)
 pnpm dev --http --insecure      # local HTTP, no auth, bound to 127.0.0.1
 pnpm build                      # tsc + Vite (dist/web) + chmod
@@ -78,7 +79,17 @@ pnpm og       # renders public/og.png, the picture shown with a shared link
 
 Everything product-specific about the site is in `site/product.mjs`.
 Its SDK reference page is `docs/sdk-reference.md`, copied in at build time, and its
-recipes are the files in `examples/`. Edit those sources, not the site.
+recipes are the files in `examples/`, each shown with its captured output from
+`examples/outputs/`. Edit those sources, not the site.
+
+When you add or change a documentation example: label every code fence (`text` for a diagram
+or output); make the program `return` a bounded result; add its expected result to
+`test/examples.spec.ts`; and add its output to `examples/outputs/<name>.json` with the date,
+the source, and `"synthetic"`. Capture a program that uses only the Federal Register and the
+eCFR against the live APIs. For one that needs a key, use a synthetic output that
+`test/examples.spec.ts` reproduces exactly, and never commit a key. The README copy of
+`examples/ecfr-section.js` and its output must match the files (`test/docs-source.spec.ts`
+checks), and every shell block in the docs is run with stub commands by the same test.
 
 The HTTP integration test (`test/http-integration.spec.ts`) exercises a real
 `http.Server` against the v2 SDK's `createMcpHandler`/`toNodeHandler` over `fetch`,

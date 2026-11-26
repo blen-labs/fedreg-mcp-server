@@ -68,6 +68,7 @@
     "build:web": "vite build --config web/vite.config.ts",
     "dev:web": "vite build --watch --config web/vite.config.ts",
     "test:web": "pnpm build:web && pnpm --dir site build && playwright test",
+    "docs:check": "node scripts/check-docs.mjs",
     "kit:check": "node scripts/portal-kit.mjs",
     "kit:update": "node scripts/portal-kit.mjs --update"
   },

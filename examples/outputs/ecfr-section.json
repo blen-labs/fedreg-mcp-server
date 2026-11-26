@@ -1,0 +1,33 @@
+{
+  "capturedOn": "2026-11-26",
+  "synthetic": false,
+  "source": "eCFR API (ecfr.gov) and Federal Register API (federalregister.gov), public domain U.S. government data",
+  "value": {
+    "section": {
+      "citation": "50 CFR 21.150",
+      "asOf": "2026-11-17",
+      "url": "https://www.ecfr.gov/current/title-50/section-21.150",
+      "text": "§ 21.150 Depredation order for blackbirds, cowbirds, crows, grackles, and magpies. (a) Species covered. Blackbirds Cowbirds Crows Grackles Magpies Brewer's (Euphagus cyanocephalus) Bronzed ( Molothrus aeneus ) American (Corvus brachyrhyncho"
+    },
+    "rules": [
+      {
+        "document_number": "2026-17733",
+        "title": "Process for Authorizing Seasonal Migratory Game Bird Hunting",
+        "publication_date": "2026-08-31",
+        "html_url": "https://www.federalregister.gov/documents/2026/08/31/2026-17733/process-for-authorizing-seasonal-migratory-game-bird-hunting"
+      },
+      {
+        "document_number": "2026-14550",
+        "title": "Endangered and Threatened Wildlife and Plants; Reclassification of the Hawaiian Stilt (Kukuluae'o or Ae'o) From Endangered to Threatened With a Section 4(d) Rule",
+        "publication_date": "2026-07-20",
+        "html_url": "https://www.federalregister.gov/documents/2026/07/20/2026-14550/endangered-and-threatened-wildlife-and-plants-reclassification-of-the-hawaiian-stilt-kukuluaeo-or"
+      },
+      {
+        "document_number": "2026-12955",
+        "title": "Process for Authorizing Seasonal Migratory Game Bird Hunting",
+        "publication_date": "2026-06-26",
+        "html_url": "https://www.federalregister.gov/documents/2026/06/26/2026-12955/process-for-authorizing-seasonal-migratory-game-bird-hunting"
+      }
+    ]
+  }
+}

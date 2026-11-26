@@ -2,7 +2,7 @@
 
 ## Overview
 
-```
+```text
 Transport (stdio | Streamable HTTP + OAuth)
     ↓
 buildMcpServer  (search_api | describe_schema | execute)
@@ -19,7 +19,7 @@ Upstream APIs
 ```
 
 The server exposes exactly three MCP tools — the "code-mode" pattern that
-Cloudflare popularized and that `clinicaltrials-mcp-server` uses:
+Cloudflare popularized:
 
 | Tool              | Purpose |
 |-------------------|---------|
@@ -35,7 +35,7 @@ and the method allowlist below.
 
 ## SDK bindings
 
-Three sibling globals are always injected into the sandbox:
+Three globals are always injected into the sandbox:
 
 - **`fr.*`** — FederalRegister.gov v1: `documents`, `publicInspection`,
   `agencies`, `issues`, `suggestedSearches`, `images`.
@@ -278,7 +278,7 @@ The HTTP transport also enforces:
 
 ## Layout
 
-```
+```text
 src/
   bin.ts                   # CLI entry
   index.ts                 # library exports
@@ -295,7 +295,7 @@ schema/
   ecfr.json                # eCFR endpoint + field corpus
   regs.json                # regulations.gov endpoint + field corpus
 test/                      # vitest specs
-examples/                  # snippets you can paste into `execute`
+examples/                  # snippets you can paste into `execute`, and their captured outputs
 deploy/                    # Dockerfile, RAILWAY.md (Railway settings live in .railway/railway.ts)
-docs/                      # this file, sdk-reference.md, migration-v2.md, migration-v3.md, migration-v4.md, release-notes/
+docs/                      # this file, accounts.md, accessibility.md, sdk-reference.md, migration-v2.md, migration-v3.md, migration-v4.md, release-notes/
 ```

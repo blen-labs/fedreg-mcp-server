@@ -1,10 +1,9 @@
 # Personal account authentication
 
-`FEDREG_AUTH_PROVIDER=accounts` enables the same Better Auth Google sign-in and
-OAuth provider used by the sibling Data.gov server. The React account and OAuth
-screens reuse the SAM.gov server’s layout, controls, and BLEN footer. This implementation supports
-personal accounts; Data.gov's organization membership and email/password flows
-are not enabled here.
+`FEDREG_AUTH_PROVIDER=accounts` enables Google sign-in (through Better Auth), an OAuth
+provider for MCP clients, and an account page. Accounts are personal: each user signs in with a
+Google account and has their own regulations.gov key. There are no organizations and no email and
+password sign-in.
 
 Users visit `/account`, sign in with Google, and save their regulations.gov key.
 The server checks the key against the regulations.gov documents endpoint before
@@ -31,7 +30,7 @@ change the key. Account settings support replacement, removal, and sign-out.
 
 ## Configuration
 
-Use a **dedicated** PostgreSQL database; do not share Data.gov's tables or secrets.
+Use a **dedicated** PostgreSQL database for this server, with its own secrets.
 Set the following in the deployment secret manager:
 
 - `FEDREG_AUTH_PROVIDER=accounts`
@@ -45,10 +44,10 @@ Set the following in the deployment secret manager:
 Configure the Google OAuth web application's redirect URI as
 `https://fedreg.mcp.blenlabs.com/api/auth/callback/google` (substitute your origin).
 The application must have the appropriate Google consent-screen configuration.
-No Google credentials from the sibling app are copied automatically.
+Create Google credentials for this server; do not reuse another application's.
 
 Start with `pnpm build && pnpm start --http`. The build compiles the React frontend
-to `dist/web`; `pnpm dev:web` rebuilds it while editing. Node 20.19+ is required. Do not use `--insecure` in account
+to `dist/web`; `pnpm dev:web` rebuilds it while editing. Do not use `--insecure` in account
 mode; startup rejects that combination. Migrations run before traffic is served,
 under a PostgreSQL advisory lock. Back up the database before upgrading.
 
@@ -56,6 +55,16 @@ HTTP loopback origins are accepted only with `NODE_ENV=development` or `test`.
 Production requires HTTPS and checks Host against the configured public origin.
 The production server assumes one trusted proxy hop, as on Railway. Direct public
 hosting or a different proxy chain needs a corresponding trust-proxy review.
+
+### Requirements
+
+- **Node.js 24.11 or later in the 24 line, or Node.js 26** (`engines` in `package.json`).
+- **Deno on `PATH`.** Account mode serves many users from one process, so it runs each `execute`
+  program only in a separate Deno process, never in the server's own process. Without Deno the
+  server still starts, `search_api` and `describe_schema` work, and `execute` returns
+  `SandboxUnavailable` with a message that says to install Deno. The Docker image in
+  `deploy/Dockerfile` already contains Deno.
+- A PostgreSQL database the server can create tables in (migrations run at startup).
 
 ## OAuth token locks and request budgets
 
@@ -124,11 +133,38 @@ is `429`.
 
 ## Encryption rotation
 
-Add the new key to `ENCRYPTION_KEYS_JSON`, retaining the old one, and set the new
-active ID. `Store.rotateKeys(batchSize)` reencrypts stored credentials in locked
-batches and records an audit event. Keep old keys until all rows and required
-backups have been migrated or expired. Loss of an encryption key makes affected
-credentials unrecoverable; users would need to save them again.
+To retire an encryption key:
+
+1. Add the new key to `ENCRYPTION_KEYS_JSON`, **keeping the old one**, and set
+   `ENCRYPTION_ACTIVE_KEY_ID` to the new ID. Deploy this. New writes now use the new key, and
+   stored rows still open with the old one. Changing the active ID alone does not migrate
+   stored rows.
+2. Back up the database.
+3. Run the rotation with the server's own account environment: the command loads the account
+   configuration exactly as the server does, so it needs every variable listed above, not only
+   `DATABASE_URL` and the encryption keys. Run it where the database is reachable, for example
+   inside the deployed service:
+
+   ```bash
+   node dist/bin.js --rotate-keys
+   ```
+
+   It re-encrypts every stored credential that is not under the active key, in batches of 100
+   (`Store.rotateAllKeys`), and records a `credential.reencrypted` audit event per row. A row
+   that cannot be opened (its key ID is no longer in `ENCRYPTION_KEYS_JSON`, or it is damaged) is
+   left as it was and recorded as `credential.reencrypt_failed`; the run continues with the next
+   row.
+4. Check the result. The command logs `accounts.keys_rotated` with the active key ID, the number
+   of rows rotated and the number that failed, and one `accounts.key_rotation_failed` line with
+   the owner for each failed row; it never logs key material. It exits 0 when every row was migrated and
+   1 when any row failed, so a script can stop before step 5. It is safe to run again: rows
+   already under the active key are skipped.
+5. Remove the old key from `ENCRYPTION_KEYS_JSON` only when the command exits 0 and every backup
+   that still holds rows sealed under it has been replaced or has expired. A restored backup
+   cannot be opened without its key.
+
+Loss of an encryption key makes the credentials sealed under it unrecoverable; users would need to
+save them again.
 
 ## Verification and rollout
 

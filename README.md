@@ -66,24 +66,71 @@ Requires **Node.js 24 or 26** (LTS). `npx` downloads and runs the server on dema
 
 > *"What does 50 CFR 21.150 cover, and have there been recent Federal Register rules touching migratory-bird depredation?"*
 
-The model finds the right calls with `search_api` and runs them in the sandbox — no hand-written tool per endpoint:
+The model finds the right calls with `search_api` and runs them in the sandbox — no hand-written tool per endpoint. This is [`examples/ecfr-section.js`](./examples/ecfr-section.js), which the test suite runs in the sandbox:
 
 ```js
-// Pull the current text of an eCFR section…
+// Paste into the `execute` tool. The current text of one eCFR section, plus the newest
+// Federal Register rules on the same subject, so an answer can cite both.
+
+// 1. The eCFR is versioned by date: ask for the title's latest issue date, then that day's section.
 const { titles } = await ecfr.titles.list();
 const date = titles.find(t => t.number === 50).latest_issue_date;
-const section = await ecfr.full(date, 50, { part: '21', section: '21.150' });
+const xml = await ecfr.full(date, 50, { part: '21', section: '21.150' });
 
-// …and search the Federal Register for related rulemaking.
+// 2. Related rulemaking in the Federal Register.
 const rules = await fr.documents.search({
   conditions: { term: 'migratory bird depredation', type: ['RULE', 'PRORULE'] },
-  fields: ['title', 'publication_date', 'html_url'],
-  per_page: 5,
+  fields: ['document_number', 'title', 'publication_date', 'html_url'],
+  per_page: 3,
   order: 'newest',
 });
+
+// 3. Return a bounded result: the section as plain text (the full XML can be large) and the rules.
+return {
+  section: {
+    citation: '50 CFR 21.150',
+    asOf: date,
+    url: 'https://www.ecfr.gov/current/title-50/section-21.150',
+    text: xml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240),
+  },
+  rules: rules.results,
+};
 ```
 
-…then answers in plain English, citing the section and the rules it found.
+It returns this (a real run on 2026-11-26 against the eCFR and Federal Register APIs, public-domain U.S. government data; the rule list changes as new rules are published):
+
+```json
+{
+  "section": {
+    "citation": "50 CFR 21.150",
+    "asOf": "2026-11-17",
+    "url": "https://www.ecfr.gov/current/title-50/section-21.150",
+    "text": "§ 21.150 Depredation order for blackbirds, cowbirds, crows, grackles, and magpies. (a) Species covered. Blackbirds Cowbirds Crows Grackles Magpies Brewer's (Euphagus cyanocephalus) Bronzed ( Molothrus aeneus ) American (Corvus brachyrhyncho"
+  },
+  "rules": [
+    {
+      "document_number": "2026-17733",
+      "title": "Process for Authorizing Seasonal Migratory Game Bird Hunting",
+      "publication_date": "2026-08-31",
+      "html_url": "https://www.federalregister.gov/documents/2026/08/31/2026-17733/process-for-authorizing-seasonal-migratory-game-bird-hunting"
+    },
+    {
+      "document_number": "2026-14550",
+      "title": "Endangered and Threatened Wildlife and Plants; Reclassification of the Hawaiian Stilt (Kukuluae'o or Ae'o) From Endangered to Threatened With a Section 4(d) Rule",
+      "publication_date": "2026-07-20",
+      "html_url": "https://www.federalregister.gov/documents/2026/07/20/2026-14550/endangered-and-threatened-wildlife-and-plants-reclassification-of-the-hawaiian-stilt-kukuluaeo-or"
+    },
+    {
+      "document_number": "2026-12955",
+      "title": "Process for Authorizing Seasonal Migratory Game Bird Hunting",
+      "publication_date": "2026-06-26",
+      "html_url": "https://www.federalregister.gov/documents/2026/06/26/2026-12955/process-for-authorizing-seasonal-migratory-game-bird-hunting"
+    }
+  ]
+}
+```
+
+…then the model answers in plain English, citing the section and the rules it found. More programs, including one that matches nothing, are in the [recipes](https://fedreg.mcp.blenlabs.com/docs/recipes/).
 
 ## What's covered
 
@@ -149,17 +196,19 @@ Every execution is bounded: code 256 KiB, returned value 8 MiB (`ResultTooLarge`
 ## Self-hosting (remote HTTP)
 
 ```bash
-# Local, single user, no auth (binds 127.0.0.1 unless HOST/--host says otherwise):
-FEDREG_REGS_API_KEY=... npx @blen/fedreg-mcp-server --http --insecure --port 8080
+# Local, single user, no auth (binds 127.0.0.1 unless HOST/--host says otherwise).
+# Replace your-regulations-gov-key, or drop that variable to leave `regs` off.
+FEDREG_REGS_API_KEY="your-regulations-gov-key" npx @blen/fedreg-mcp-server --http --insecure --port 8080
 
 # Your own server, authenticated via an OIDC issuer (your regulations.gov key serves every
 # token holder). Issuer, audience and an https JWKS URL are all required; Deno must be installed.
-FEDREG_REGS_API_KEY=... \
+# Replace your-regulations-gov-key, your-tenant (your Clerk instance) and your-host.example.com.
+FEDREG_REGS_API_KEY="your-regulations-gov-key" \
 FEDREG_AUTH_PROVIDER=clerk \
-FEDREG_AUTH_ISSUER=https://<tenant>.clerk.accounts.dev \
-FEDREG_AUTH_AUDIENCE=https://your-host.example.com/mcp \
-FEDREG_AUTH_JWKS_URL=https://<tenant>.clerk.accounts.dev/.well-known/jwks.json \
-FEDREG_PUBLIC_ORIGIN=https://your-host.example.com \
+FEDREG_AUTH_ISSUER="https://your-tenant.clerk.accounts.dev" \
+FEDREG_AUTH_AUDIENCE="https://your-host.example.com/mcp" \
+FEDREG_AUTH_JWKS_URL="https://your-tenant.clerk.accounts.dev/.well-known/jwks.json" \
+FEDREG_PUBLIC_ORIGIN="https://your-host.example.com" \
   npx @blen/fedreg-mcp-server --http
 ```
 
@@ -212,7 +261,7 @@ The knobs below are every environment variable the server reads at startup (defa
 | `FEDREG_AUTH_LOCK_POOL_SIZE` | `10` | Accounts mode: connections per replica reserved for OAuth token locks (2 to 200); see [docs/accounts.md](docs/accounts.md#oauth-token-locks-and-request-budgets). |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |
 
-CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--help`.
+CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--rotate-keys` (account mode: re-encrypt stored keys, see [docs/accounts.md](docs/accounts.md#encryption-rotation)), `--help`.
 
 ## Security
 

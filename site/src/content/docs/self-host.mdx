@@ -18,25 +18,26 @@ server's own key, so use it only for yourself. To host for other people, use acc
 ## Local
 
 ```bash
-FEDREG_REGS_API_KEY=... npx @blen/fedreg-mcp-server --http --insecure --port 8080
+FEDREG_REGS_API_KEY="your-regulations-gov-key" npx @blen/fedreg-mcp-server --http --insecure --port 8080
 ```
 
-There is no sign-in. The server binds to `127.0.0.1` unless `HOST` or `--host` names another
-address. The key is optional: leave it out and `regs` is off.
+Replace `your-regulations-gov-key` with your key, or drop that variable to leave `regs` off. There is no sign-in. The server binds to `127.0.0.1` unless `HOST` or `--host` names another
+address.
 
 ## Single owner
 
 ```bash
-FEDREG_REGS_API_KEY=... \
+FEDREG_REGS_API_KEY="your-regulations-gov-key" \
 FEDREG_AUTH_PROVIDER=clerk \
-FEDREG_AUTH_ISSUER=https://<tenant>.clerk.accounts.dev \
-FEDREG_AUTH_AUDIENCE=https://your-host.example.com/mcp \
-FEDREG_AUTH_JWKS_URL=https://<tenant>.clerk.accounts.dev/.well-known/jwks.json \
-FEDREG_PUBLIC_ORIGIN=https://your-host.example.com \
+FEDREG_AUTH_ISSUER="https://your-tenant.clerk.accounts.dev" \
+FEDREG_AUTH_AUDIENCE="https://your-host.example.com/mcp" \
+FEDREG_AUTH_JWKS_URL="https://your-tenant.clerk.accounts.dev/.well-known/jwks.json" \
+FEDREG_PUBLIC_ORIGIN="https://your-host.example.com" \
   npx @blen/fedreg-mcp-server --http
 ```
 
-The issuer, the audience, and an HTTPS JWKS URL are all required. The provider can be `clerk`,
+Replace `your-regulations-gov-key`, `your-tenant` (your Clerk instance, or the issuer host of
+another provider) and `your-host.example.com` (the public address of your server). The issuer, the audience, and an HTTPS JWKS URL are all required. The provider can be `clerk`,
 `workos`, `auth0`, or `generic-oidc`. Then give your client the URL
 `https://your-host.example.com/mcp`.
 

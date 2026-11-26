@@ -1,0 +1,29 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+interface Props {
+  /** The example's file name in the repository's examples/ folder, such as fr-search.js. */
+  file: string;
+}
+
+// examples/outputs/ holds what each example returned when it was captured: test/examples.spec.ts
+// checks that each file is dated, attributed and small, and that a synthetic one is exactly what
+// the example returns on synthetic responses. The path starts at the working directory because
+// the build bundles this component elsewhere.
+const { file } = Astro.props;
+const path = resolve(process.cwd(), '../examples/outputs', file.replace(/\.js$/, '.json'));
+const { capturedOn, synthetic, source, value } = JSON.parse(readFileSync(path, 'utf8'));
+// Each block needs its own accessible name, so the title names the example it belongs to.
+const label = `${synthetic ? 'Synthetic' : 'Real'} output of ${file} (${capturedOn})`;
+---
+
+<Code code={JSON.stringify(value, null, 2)} lang="json" title={label} />
+<p>
+  {
+    synthetic
+      ? `${source} Run it with your own key to see a real result.`
+      : `Captured ${capturedOn} from the live APIs. Source: ${source}. Results change as agencies publish.`
+  }
+</p>
