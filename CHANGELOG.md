@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-11-26
+
+### Fixed
+- keep the user lock key across rollouts, treat connection timeouts as 503, canonicalize IPs in linear time (security)
+- pass the lock body to Request as bytes (types)
+- read lock fields with the runtime form parser and canonicalize every IPv4-mapped spelling (security)
+- check every repeated redirect_uri; drop a needless chunk copy; correct limiter docs (security)
+- port token-lock, limiter, input and upstream I/O hardening from the fleet (security)
+
+### Changed
+- import the Socket type (test)
+- fix the runtime image name and a typo in RAILWAY.md (deploy)
+- point domain and start-command guidance at .railway/railway.ts (deploy)
+- make .railway/railway.ts the only Railway config (deploy)
+
 ## [4.0.0] - 2026-11-22
 
 ### Breaking
@@ -369,7 +384,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.1...HEAD
+[4.0.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.0
 [4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.4...v3.0.0
