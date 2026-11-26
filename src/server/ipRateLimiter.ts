@@ -7,7 +7,7 @@ import { LRUCache } from 'lru-cache';
  */
 export class IpRateLimiter {
   private readonly buckets: LRUCache<string, { tokens: number; updatedAt: number }>;
-  constructor(private readonly rps: number, private readonly burst: number, private readonly clock: () => number = Date.now) {
+  constructor(private readonly rps: number, private readonly burst: number) {
     // An idle bucket refills to `burst` within burst/rps seconds; after that it is
     // indistinguishable from a new one, so it can be dropped. Bounded so a flood of
     // distinct addresses cannot grow memory without limit.
@@ -18,7 +18,7 @@ export class IpRateLimiter {
     this.buckets = new LRUCache({ max: 50_000, ttl });
   }
 
-  /** Atomically reserves one token; false when the address bucket is out of them. Pair a reservation with `refund`. */
+  /** Atomically takes one token; false when the address bucket is out of them. */
   allow(ip: string): boolean {
     const key = bucketKey(ip);
     const b = this.refilled(key);
@@ -28,16 +28,8 @@ export class IpRateLimiter {
     return allowed;
   }
 
-  /** Gives back a token that `allow(ip)` reserved, for a request that turned out not to count. */
-  refund(ip: string): void {
-    const key = bucketKey(ip);
-    const b = this.refilled(key);
-    b.tokens = Math.min(this.burst, b.tokens + 1);
-    this.buckets.set(key, b);
-  }
-
   private refilled(key: string) {
-    const now = this.clock();
+    const now = Date.now();
     const b = this.buckets.get(key) ?? { tokens: this.burst, updatedAt: now };
     b.tokens = Math.min(this.burst, b.tokens + ((now - b.updatedAt) / 1000) * this.rps);
     b.updatedAt = now;
