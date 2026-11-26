@@ -127,37 +127,68 @@ export class Store {
     );
     return result.rows[0].count <= maximum;
   }
-  async rotateKeys(batchSize = 100) {
+  /**
+   * Re-encrypts one batch of credentials sealed under a key other than the active one, in owner
+   * order after `after`. A row that cannot be opened is reported and left as it was, so one bad row
+   * never blocks the rest.
+   */
+  async rotateKeys(batchSize = 100, after?: string): Promise<{ rotated: number; failed: string[]; next?: string }> {
     if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 1000)
       throw new Error('Invalid rotation batch size');
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       const rows = await client.query(
-        "SELECT owner,ciphertext FROM credentials WHERE ciphertext->>'kid' <> $1 ORDER BY owner LIMIT $2 FOR UPDATE",
-        [this.keyring.activeId, batchSize],
+        `SELECT owner,ciphertext FROM credentials WHERE ciphertext->>'kid' IS DISTINCT FROM $1
+         AND ($3::text IS NULL OR owner > $3::text) ORDER BY owner LIMIT $2 FOR UPDATE`,
+        [this.keyring.activeId, batchSize, after ?? null],
       );
-      for (const row of rows.rows) {
+      let rotated = 0;
+      const failed: string[] = [];
+      for (const row of rows.rows as { owner: string; ciphertext: Sealed }[]) {
         const context = `regulations.gov:${row.owner}`;
-        const sealed = this.keyring.seal(this.keyring.open(row.ciphertext, context), context);
-        await client.query('UPDATE credentials SET ciphertext=$2 WHERE owner=$1', [
-          row.owner,
-          sealed,
-        ]);
+        let sealed: Sealed;
+        try {
+          sealed = this.keyring.seal(this.keyring.open(row.ciphertext, context), context);
+        } catch {
+          failed.push(row.owner);
+          await client.query('INSERT INTO audit_events(tenant,actor,action) VALUES($1,$2,$3)', [
+            row.owner,
+            'service-operator',
+            'credential.reencrypt_failed',
+          ]);
+          continue;
+        }
+        await client.query('UPDATE credentials SET ciphertext=$2 WHERE owner=$1', [row.owner, sealed]);
         await client.query('INSERT INTO audit_events(tenant,actor,action) VALUES($1,$2,$3)', [
           row.owner,
           'service-operator',
           'credential.reencrypted',
         ]);
+        rotated++;
       }
       await client.query('COMMIT');
-      return rows.rowCount ?? 0;
+      const last = rows.rows.at(-1) as { owner: string } | undefined;
+      return { rotated, failed, next: rows.rows.length === batchSize && last ? last.owner : undefined };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
     }
+  }
+  /** Rotates every credential, batch by batch. Rows that cannot be opened are reported, not retried. */
+  async rotateAllKeys(batchSize = 100): Promise<{ rotated: number; failed: string[] }> {
+    let rotated = 0;
+    const failed: string[] = [];
+    let after: string | undefined;
+    do {
+      const batch = await this.rotateKeys(batchSize, after);
+      rotated += batch.rotated;
+      failed.push(...batch.failed);
+      after = batch.next;
+    } while (after);
+    return { rotated, failed };
   }
   async cleanup() {
     await this.pool.query('DELETE FROM request_limits WHERE expires_at<now()');
