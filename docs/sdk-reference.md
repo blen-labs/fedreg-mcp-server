@@ -199,6 +199,9 @@ receives that envelope as `structuredContent` (and as compact JSON text) with
 - Prefer `fields` on `fr.documents.search` to keep payloads small.
 - For exploratory queries, set `per_page` low (5–25) then drill down.
 - `ecfr.full` returns large XML; pass a `query` (at least `{ part }`) to
-  stay under a few MB.
+  stay under a few MB. Upstream responses are capped (16 MiB for `fr` and
+  `regs`, 192 MiB for `ecfr`, measured compressed and decompressed); a larger
+  one throws `ResponseTooLarge` instead of being truncated, so narrow the
+  request and paginate.
 - Cache idempotent calls in your own code; the host LRU caches identical
   URL hits for 5 minutes by default.

@@ -1,6 +1,7 @@
 import express from 'express';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { createMcpHandler } from '@modelcontextprotocol/server';
+import { stripAccessTokenAuthorizationScheme } from 'better-auth/oauth2';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { buildMcpServer, MCP_PROTOCOL_VERSION } from '../server/mcpServer.js';
 import type { CatalogDeps } from '../server/toolCatalog.js';
@@ -10,8 +11,8 @@ import { createAuth, initializeAuth, type Auth } from './provider.js';
 import { installPortal } from './portal.js';
 import { digest } from './crypto.js';
 import { log } from '../util/logger.js';
-import { IpRateLimiter, clientIp } from '../server/ipRateLimiter.js';
-import { originAllowed, MAX_REQUEST_BODY_BYTES } from '../server/http.js';
+import { IpRateLimiter, bucketKey, clientIp } from '../server/ipRateLimiter.js';
+import { originAllowed, bearerToken, MAX_REQUEST_BODY_BYTES } from '../server/http.js';
 import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { DOCS_PATH, docsHandler } from './docs.js';
 import { readFile } from 'node:fs/promises';
@@ -33,6 +34,26 @@ const CORS_ALLOW_HEADERS =
 
 /** Longest a token or revoke request waits for a lock connection, and then for the lock. */
 const LOCK_WAIT_MS = 10_000;
+const FORM = 'application/x-www-form-urlencoded';
+/** PostgreSQL's lock_not_available (lock_timeout) or the pool's connection wait running out. */
+const isLockWaitTimeout = (error: unknown) =>
+  (error as { code?: string })?.code === '55P03' ||
+  /timeout exceeded when trying to connect|Connection terminated due to connection timeout/i.test(String((error as Error)?.message));
+/**
+ * The lock key of a user's tokens. Unchanged from the key earlier releases took, so instances of
+ * both versions running side by side during a rollout still serialize on the same lock.
+ */
+export const userLockKey = (userId: string) => `user:${userId}`;
+/** pg_advisory_xact_lock takes a signed 64-bit key. */
+export const advisoryId = (key: string) => BigInt.asIntN(64, BigInt(`0x${digest(key).slice(0, 16)}`)).toString();
+/** Failed bearer checks per address: 2 each second, bursts of 120, far below the flood guard. */
+const FAILED_TOKEN_RPS = 2;
+const FAILED_TOKEN_BURST = 120;
+/** Most /mcp/account token checks in flight per address, so the budget cannot be dodged by concurrency. */
+const MAX_TOKEN_CHECKS_IN_FLIGHT = 256;
+/** Token and revoke requests per address: 20 each second, bursts of 600. */
+const TOKEN_REQUEST_RPS = 20;
+const TOKEN_REQUEST_BURST = 600;
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 /** Redirect URIs in a registration body; malformed JSON is left for Better Auth to reject. */
@@ -42,6 +63,20 @@ function registeredRedirects(body: Buffer): unknown {
   } catch {
     return [];
   }
+}
+/** Values of a field in a POST body, whether form-encoded or JSON (either may reach Better Auth). */
+function jsonOrForm(body: Buffer): { getAll(name: string): string[] } {
+  const text = body.toString('utf8').trim();
+  if (text.startsWith('{')) {
+    try {
+      const fields = JSON.parse(text) as Record<string, unknown>;
+      return { getAll: name => { const v = fields[name]; return v === undefined || v === null ? [] : [String(v)]; } };
+    } catch {
+      // Not parseable: a value no redirect check accepts, so the request is refused here.
+      return { getAll: () => ['invalid'] };
+    }
+  }
+  return new URLSearchParams(text);
 }
 /** Client-side routes of the portal (web/src/main.tsx), served as index.html. */
 const PORTAL_ROUTES = ['/', '/sign-in', '/connect', '/consent', '/account', '/error'];
@@ -93,6 +128,15 @@ export async function createAccountApp(
   fetcher: typeof fetch = fetch,
   /** Catalog for the anonymous endpoint (see publicDependencies): no subject, regs only via a shared key. */
   publicDeps: CatalogDeps,
+  /** Test seams: shorten the token-lock wait, shrink the per-IP budgets. */
+  limits: {
+    lockWaitMs?: number;
+    maxTokenChecksInFlight?: number;
+    tokenRequestLimit?: { rps: number; burst: number };
+    failedTokenLimit?: { rps: number; burst: number };
+    /** Overrides for the lock pool's connection settings (tests point it at a stalled server). */
+    lockPool?: { connectionString?: string };
+  } = {},
 ): Promise<{ app: express.Express; auth: Auth; mcp: ReturnType<typeof createMcpHandler>; close: () => Promise<void> }> {
   const app = express();
   app.disable('x-powered-by');
@@ -101,35 +145,74 @@ export async function createAccountApp(
   // With `trust proxy` 1, req.ip is the rightmost X-Forwarded-For entry. Railway rebuilds that
   // header as "<client>, <edge>", so req.ip is its edge, shared by many users. The header the
   // proxy overwrites with the client address (Railway: x-real-ip) is used instead when set.
-  const ipOf = (req: express.Request) => config.clientIpHeader ? clientIp(req, config.clientIpHeader) : req.ip;
+  const ipOf = (req: express.Request) => clientIp(req, config.clientIpHeader);
   const auth = createAuth(config, store);
   await initializeAuth(auth, config, store);
   // Each waiting token request holds a connection, so size this for concurrent token requests.
-  const locks = new Pool({ ...store.pool.options, max: 10, connectionTimeoutMillis: LOCK_WAIT_MS });
+  const lockWaitMs = limits.lockWaitMs ?? LOCK_WAIT_MS;
+  const locks = new Pool({ ...store.pool.options, ...limits.lockPool, max: config.authLockPoolSize ?? 10, connectionTimeoutMillis: lockWaitMs });
   locks.on('error', () => log.error('account.auth_lock_connection_error'));
   /**
-   * The advisory lock for a /oauth2/token or /oauth2/revoke body: the owner of the presented
-   * refresh or access token, else the presented code or token itself (an unknown token
-   * changes nothing, and a code is single-use). Tokens are stored as digests of their value.
+   * The advisory lock for the operation Better Auth will execute for a /oauth2/token or
+   * /oauth2/revoke request, chosen the way Better Auth reads the request: only a
+   * form-urlencoded body is accepted (anything else is a 415 that changes nothing), a repeated
+   * field takes its last value, and the grant decides which field matters. Revoke acts on
+   * `token` (after any access-token scheme prefix is stripped), a refresh_token grant on
+   * `refresh_token`, an authorization_code grant on `code`; other fields are ignored, as Better
+   * Auth ignores them. Conflicting repeats of the grant or of the chosen field are refused
+   * rather than guessed at.
+   *
+   * A presented refresh or access token locks on its owner (`user:<id>`, the key earlier releases
+   * used, so a rolling deploy keeps one lock): the same user's requests queue, other users never do. An unknown token locks on itself and a code (single-use) on itself. With
+   * nothing to serialize (client_credentials, unsupported grants, missing fields, other media
+   * types) there is no lock. Tokens are stored as digests of their value.
    */
-  const tokenLockId = async (body: Buffer | undefined) => {
-    let fields: Record<string, unknown> = {};
-    const text = body?.toString('utf8').trim() ?? '';
-    try { fields = text.startsWith('{') ? JSON.parse(text) : Object.fromEntries(new URLSearchParams(text)); }
-    catch { /* Better Auth rejects the malformed body; any lock id will do. */ }
-    const value = (name: string) => typeof fields[name] === 'string' ? fields[name] as string : undefined;
-    const token = value('refresh_token') ?? value('token');
-    let key = `code:${value('code') ?? ''}`;
-    if (token) {
-      const { adapter } = await auth.$context;
-      const where = [{ field: 'token', value: digest(token) }];
-      const row = await adapter.findOne<{ userId?: string }>({ model: 'oauthRefreshToken', where })
-        ?? await adapter.findOne<{ userId?: string }>({ model: 'oauthAccessToken', where });
-      key = row?.userId ? `user:${row.userId}` : `token:${digest(token)}`;
+  const tokenLockId = async (
+    path: string,
+    contentType: string | undefined,
+    body: Buffer | undefined,
+  ): Promise<{ id?: string; reject?: true }> => {
+    if (!body || contentType?.toLowerCase().split(';')[0]?.trim() !== FORM) return {};
+    // Parse with the runtime parser Better Auth (better-call) uses, Request.formData(), so any
+    // runtime quirk (a leading '?' or BOM, percent-decoding) reads the same here as there.
+    let form: FormData;
+    try {
+      form = await new Request('http://localhost/', { method: 'POST', headers: { 'content-type': contentType! }, body: new Uint8Array(body) }).formData();
+    } catch {
+      return { reject: true };
     }
-    // pg_advisory_lock takes a signed 64-bit key.
-    return BigInt.asIntN(64, BigInt(`0x${digest(key).slice(0, 16)}`)).toString();
+    const field = (name: string) => {
+      const values = form.getAll(name).map(String);
+      return values.length > 1 && new Set(values).size > 1 ? null : (values.at(-1) ?? '');
+    };
+    // Better Auth takes the last of a repeated field, so a conflicting repeat of the grant
+    // would otherwise run a different operation than the one locked for.
+    const requested = field('grant_type');
+    if (path !== '/oauth2/revoke' && requested === null) return { reject: true };
+    const grant = path === '/oauth2/revoke' ? 'revoke' : requested?.trim();
+    const name = grant === 'revoke' ? 'token'
+      : grant === 'refresh_token' ? 'refresh_token'
+      : grant === 'authorization_code' ? 'code'
+      : undefined;
+    if (!name) return {};
+    let value = field(name);
+    if (value === null) return { reject: true };
+    if (name === 'token') value = stripAccessTokenAuthorizationScheme(value);
+    if (!value) return {};
+    if (name === 'code') return { id: advisoryId(`code:${value}`) };
+    const { adapter } = await auth.$context;
+    const where = [{ field: 'token', value: digest(value) }];
+    const row = await adapter.findOne<{ userId?: string }>({ model: 'oauthRefreshToken', where })
+      ?? await adapter.findOne<{ userId?: string }>({ model: 'oauthAccessToken', where });
+    return { id: advisoryId(row?.userId ? userLockKey(row.userId) : `token:${digest(value)}`) };
   };
+  // Looking up the presented token costs database queries before any lock, and these routes
+  // skip the page limiter, so each address gets a bounded budget sized for refresh traffic from
+  // a connector's shared egress IP (Better Auth's own token limit is 1200 a minute).
+  const tokenRequests = new IpRateLimiter(
+    limits.tokenRequestLimit?.rps ?? TOKEN_REQUEST_RPS,
+    limits.tokenRequestLimit?.burst ?? TOKEN_REQUEST_BURST,
+  );
   const mcp = createMcpHandler(
     ctx => buildMcpServer(deps, { subject: ctx.authInfo?.extra?.userId as string | undefined }),
     { legacy: 'stateless', maxSubscriptions: 0, maxRequestBodySize: MAX_REQUEST_BODY_BYTES, onerror: () => log.warn('account.mcp_handler_error') },
@@ -147,8 +230,10 @@ export async function createAccountApp(
   const metadataUrl = `${config.origin}/.well-known/oauth-protected-resource${ACCOUNT_MCP_PATH}`;
   const originHost = new URL(config.origin).host;
   app.use((req, res, next) => {
+    // Hashed bundles under /assets set their own immutable Cache-Control; serve-static leaves an
+    // existing header alone, so no-store here would defeat it.
+    if (!req.path.startsWith('/assets/')) res.set('Cache-Control', 'no-store');
     res.set({
-      'Cache-Control': 'no-store',
       'Referrer-Policy': 'strict-origin',
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
@@ -194,6 +279,11 @@ export async function createAccountApp(
   });
   const webRoot = fileURLToPath(new URL('../../dist/web/', import.meta.url));
   app.use('/assets', express.static(resolve(webRoot, 'assets'), { immutable: true, maxAge: '1y', index: false }));
+  // A missing bundle falls through here: the immutable header is only set on a file that exists.
+  app.use('/assets', (_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
   // The documentation site, when the image carries it (deploy/Dockerfile builds site/ into
   // docs-site/, a sibling of dist/ that the npm package does not ship). Static and public, so it
   // sits before the per-IP limiter like /assets, with its own CSP (see docs.ts).
@@ -239,8 +329,8 @@ export async function createAccountApp(
     // (see below). The anonymous endpoint has its own per-IP bucket (FEDREG_IP_RPS/BURST) below.
     const platform =
       CROSS_ORIGIN_PATHS.test(req.path) &&
-      (req.path !== ACCOUNT_MCP_PATH || !!req.headers.authorization?.startsWith('Bearer '));
-    if (!platform && !(await store.allow(`http:${ipOf(req)}`, 600, 60))) return tooMany(res);
+      (req.path !== ACCOUNT_MCP_PATH || !!bearerToken(req.headers.authorization));
+    if (!platform && !(await store.allow(`http:${bucketKey(ipOf(req))}`, 600, 60))) return tooMany(res);
     next();
   });
   const mcpNode = toNodeHandler(mcp, {
@@ -256,7 +346,7 @@ export async function createAccountApp(
   // Federal Register and eCFR need no sign-in. A bearer token sent here is ignored: signed-in
   // access, and regulations.gov with the user's own key, live at ACCOUNT_MCP_PATH.
   app.all(PUBLIC_MCP_PATH, async (req, res) => {
-    if (!publicLimiter.allow(ipOf(req) ?? 'unknown')) return tooMany(res);
+    if (!publicLimiter.allow(ipOf(req))) return tooMany(res);
     // MCP's Origin rule: with no token to check, another site's page must not drive this endpoint
     // (it runs code). Non-browser clients send no Origin and pass. The signed-in endpoint accepts
     // any Origin: hosted connectors (claude.ai, chatgpt.com) send theirs, every request carries a
@@ -265,11 +355,14 @@ export async function createAccountApp(
     if (typeof origin === 'string' && !originAllowed(origin, config.origin, config.allowedOrigins ?? []))
       return res.status(403).json({ error: 'origin_not_allowed' });
     // toNodeHandler forwards req.auth to the factory; no token is involved.
-    Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${ipOf(req) ?? 'unknown'}` } } });
+    Object.assign(req, { auth: { token: '', clientId: 'anonymous', scopes: [], extra: { anonymousSubject: `anon:${bucketKey(ipOf(req))}` } } });
     await publicNode(req, res);
   });
   // No body parser: the SDK reads the body itself (capped by maxRequestBodySize, as in the base
   // HTTP transport) and only after the token checks below pass.
+  const failedTokens = new IpRateLimiter(limits.failedTokenLimit?.rps ?? FAILED_TOKEN_RPS, limits.failedTokenLimit?.burst ?? FAILED_TOKEN_BURST);
+  const tokenChecks = new Map<string, number>();
+  const maxTokenChecks = limits.maxTokenChecksInFlight ?? MAX_TOKEN_CHECKS_IN_FLIGHT;
   app.all(ACCOUNT_MCP_PATH, async (req, res) => {
     const challenge = (status: number, error: string) =>
       res
@@ -280,36 +373,58 @@ export async function createAccountApp(
         )
         .json({ error });
     const authorization = req.headers.authorization;
-    if (!authorization?.startsWith('Bearer ') || authorization.length > 4096)
+    const value = bearerToken(authorization);
+    if (!value || authorization!.length > 4096) return challenge(401, 'invalid_token');
+    const ip = ipOf(req);
+    // Counted like the failed-token budget: an IPv6 /64 is one client, however many addresses.
+    const checkKey = bucketKey(ip);
+    // Any bearer value skips the per-IP limit in the middleware above, so tokens that fail the
+    // checks below are limited here, in memory: past the limit a made-up token costs no database
+    // round trip. Only a token proven invalid spends the budget (a valid one, a database error or
+    // another limit does not), and a cap on checks in flight bounds what concurrent requests can
+    // do before their failures are counted.
+    if (!failedTokens.available(ip) || (tokenChecks.get(checkKey) ?? 0) >= maxTokenChecks) return tooMany(res);
+    const rejected = () => {
+      failedTokens.spend(ip);
       return challenge(401, 'invalid_token');
-    // A flood guard sized for a connector's shared IP; the per-user limit below does the real work.
-    if (!(await store.allow(`mcp-ip:${ipOf(req)}`, 6000, 60))) return tooMany(res);
-    const value = authorization.slice(7);
-    // Opaque tokens are checked against their hashed database row on every request, so
-    // revocation, client disabling, user deletion and loss of email verification apply immediately.
-    const context = await auth.$context;
-    const token = await context.adapter.findOne<AccessTokenRow>({
-      model: 'oauthAccessToken',
-      where: [{ field: 'token', value: digest(value) }],
+    };
+    tokenChecks.set(checkKey, (tokenChecks.get(checkKey) ?? 0) + 1);
+    const checked = await (async () => {
+      // A flood guard sized for a connector's shared IP; the per-user limit below does the real work.
+      if (!(await store.allow(`mcp-ip:${checkKey}`, 6000, 60))) return void tooMany(res);
+      // Opaque tokens are checked against their hashed database row on every request, so
+      // revocation, client disabling, user deletion and loss of email verification apply immediately.
+      const context = await auth.$context;
+      const token = await context.adapter.findOne<AccessTokenRow>({
+        model: 'oauthAccessToken',
+        where: [{ field: 'token', value: digest(value) }],
+      });
+      if (
+        !token?.userId ||
+        token.revoked ||
+        !(new Date(token.expiresAt).getTime() > Date.now()) ||
+        !(token.resources ?? []).includes(resource)
+      )
+        return void rejected();
+      const [client, user] = await Promise.all([
+        context.adapter.findOne<{ disabled?: boolean | null }>({
+          model: 'oauthClient',
+          where: [{ field: 'clientId', value: token.clientId }],
+        }),
+        context.adapter.findOne<{ id: string; emailVerified?: boolean | null }>({
+          model: 'user',
+          where: [{ field: 'id', value: token.userId }],
+        }),
+      ]);
+      if (!client || client.disabled || !user?.emailVerified) return void rejected();
+      return { token, user };
+    })().finally(() => {
+      const left = (tokenChecks.get(checkKey) ?? 1) - 1;
+      if (left > 0) tokenChecks.set(checkKey, left);
+      else tokenChecks.delete(checkKey);
     });
-    if (
-      !token?.userId ||
-      token.revoked ||
-      !(new Date(token.expiresAt).getTime() > Date.now()) ||
-      !(token.resources ?? []).includes(resource)
-    )
-      return challenge(401, 'invalid_token');
-    const [client, user] = await Promise.all([
-      context.adapter.findOne<{ disabled?: boolean | null }>({
-        model: 'oauthClient',
-        where: [{ field: 'clientId', value: token.clientId }],
-      }),
-      context.adapter.findOne<{ id: string; emailVerified?: boolean | null }>({
-        model: 'user',
-        where: [{ field: 'id', value: token.userId }],
-      }),
-    ]);
-    if (!client || client.disabled || !user?.emailVerified) return challenge(401, 'invalid_token');
+    if (!checked) return;
+    const { token, user } = checked;
     if (!(token.scopes ?? []).includes('fedreg:read')) return challenge(403, 'insufficient_scope');
     if (!(await store.allow(`mcp-user:${user.id}`, 600, 60))) return tooMany(res);
     const day = new Date().toISOString().slice(0, 10);
@@ -346,9 +461,9 @@ export async function createAccountApp(
       const headers = new Headers();
       for (const [name, value] of Object.entries(req.headers))
         if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+      // Forward only the client address chosen above, never a caller-supplied chain.
       const ip = ipOf(req);
-      if (ip) headers.set('x-forwarded-for', ip);
-      else headers.delete('x-forwarded-for');
+      headers.set('x-forwarded-for', ip);
       const authUrl = new URL(req.originalUrl, config.origin);
       // WHATWG Request normalizes dot segments and backslashes. Reject aliases
       // before forwarding so Express guards and Better Auth see the same path.
@@ -362,18 +477,37 @@ export async function createAccountApp(
         req.path === '/oauth2/register' && Buffer.isBuffer(body)
           ? registeredRedirects(body)
           : req.path === '/oauth2/authorize'
-            ? [
-                (req.method === 'POST' && Buffer.isBuffer(body)
-                  ? new URLSearchParams(body.toString('utf8'))
-                  : authUrl.searchParams
-                ).get('redirect_uri'),
-              ].filter(Boolean)
+            // Every value is checked: a repeated field is read by Better Auth as its last value,
+            // which the first one alone would not show.
+            ? (req.method === 'POST' && Buffer.isBuffer(body)
+                ? jsonOrForm(body)
+                : authUrl.searchParams
+              ).getAll('redirect_uri').filter(Boolean)
             : [];
       if (!Array.isArray(redirects) || !redirects.every(allowedRedirect))
         return res.status(400).json({
           error: req.path === '/oauth2/register' ? 'invalid_redirect_uri' : 'invalid_request',
           error_description: 'Redirect URIs must use HTTPS or a localhost address.',
         });
+      // Desktop MCP clients register loopback redirects (http://127.0.0.1:<port>/callback, RFC 8252)
+      // and often omit `application_type`, which OpenID DCR defaults to "web" (HTTPS only), so the
+      // registration would fail. All-loopback-HTTP registrations are native apps: say so.
+      if (
+        req.path === '/oauth2/register' &&
+        Buffer.isBuffer(body) &&
+        redirects.length > 0 &&
+        (redirects as string[]).every(uri => new URL(uri).protocol === 'http:')
+      ) {
+        try {
+          const parsed = JSON.parse(body.toString('utf8')) as Record<string, unknown>;
+          if (parsed && typeof parsed === 'object' && parsed.application_type === undefined) {
+            body = Buffer.from(JSON.stringify({ ...parsed, application_type: 'native' }));
+            headers.delete('content-length');
+          }
+        } catch {
+          // Malformed JSON: Better Auth rejects it.
+        }
+      }
       // Clients that omit RFC 8707 `resource` (Gemini Enterprise may) would get tokens this
       // server cannot accept. It protects one resource, so default to it; the code keeps it.
       if (req.path === '/oauth2/authorize') {
@@ -388,6 +522,17 @@ export async function createAccountApp(
           if (!form.get('resource')) form.set('resource', resource);
           body = Buffer.from(form.toString());
           headers.delete('content-length');
+        }
+        if (req.method === 'POST' && req.is('application/json') && Buffer.isBuffer(body)) {
+          try {
+            const parsed = JSON.parse(body.toString('utf8')) as Record<string, unknown>;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && !parsed.resource) {
+              body = Buffer.from(JSON.stringify({ ...parsed, resource }));
+              headers.delete('content-length');
+            }
+          } catch {
+            // Malformed JSON: Better Auth rejects it.
+          }
         }
       }
       const request = new Request(authUrl, {
@@ -405,19 +550,36 @@ export async function createAccountApp(
       if (req.path !== '/oauth2/token' && req.path !== '/oauth2/revoke') return execute();
       // Serialize token-family rotation and invalidation across replicas. Better Auth's
       // current adapter performs those writes separately; overlapping requests must not
-      // interleave. A family is every refresh token of one (client, user), so refresh and revoke
-      // lock per user and a code exchange locks per code: unrelated users never queue together.
-      // A code exchange can still overlap a family wipe for the same user; at worst that new
-      // authorization is revoked and the user authorizes again.
-      const lockId = await tokenLockId(Buffer.isBuffer(body) ? body : undefined);
-      const lock = await locks.connect();
+      // interleave. A refresh and a revoke lock per user and a code exchange per code,
+      // so unrelated users never queue together. A code exchange can still overlap a family wipe
+      // for the same user; at worst that new authorization is revoked and the user authorizes again.
+      if (!tokenRequests.allow(ip)) return tooMany(res);
+      const selected = await tokenLockId(req.path, req.get('content-type'), Buffer.isBuffer(body) ? body : undefined);
+      if (selected.reject)
+        return res.status(400).json({ error: 'invalid_request', error_description: 'Conflicting values for a repeated parameter.' });
+      if (selected.id === undefined) return execute();
+      // Too busy to take the lock in time: the client should retry, not see a server fault.
+      const busy = () => res.status(503).set('Retry-After', '1').json({ error: 'temporarily_unavailable' });
+      let lock: PoolClient;
+      try {
+        lock = await locks.connect();
+      } catch (error) {
+        if (isLockWaitTimeout(error)) return busy();
+        throw error;
+      }
       // A transaction-scoped lock is released by COMMIT or ROLLBACK, and a bounded wait keeps one
       // stuck request from holding every lock connection and queueing all users' token requests.
       let broken = false;
       try {
         await lock.query('BEGIN');
-        await lock.query(`SET LOCAL lock_timeout = '${LOCK_WAIT_MS}ms'`);
-        await lock.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
+        await lock.query(`SET LOCAL lock_timeout = '${lockWaitMs}ms'`);
+        try {
+          await lock.query('SELECT pg_advisory_xact_lock($1)', [selected.id]);
+        } catch (error) {
+          if (!isLockWaitTimeout(error)) throw error;
+          await lock.query('ROLLBACK').catch(() => { broken = true; });
+          return busy();
+        }
         await execute();
         await lock.query('COMMIT');
       } catch (error) {

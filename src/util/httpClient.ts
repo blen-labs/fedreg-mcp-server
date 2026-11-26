@@ -6,7 +6,18 @@ import { promisify } from 'node:util';
 import { log } from './logger.js';
 import { abortError, currentSignal, sleep } from './executionContext.js';
 
-const decompressGzip = promisify(gunzip);
+const decompressGzip = promisify(gunzip) as (buf: Buffer, opts: { maxOutputLength: number }) => Promise<Buffer>;
+
+/**
+ * Largest upstream response body kept in memory (after decompression), by default. Federal
+ * Register and regulations.gov responses are JSON pages of a few MB at most; eCFR full-text
+ * XML can be much larger and its source raises this (see ECFR_MAX_RESPONSE_BYTES).
+ */
+export const DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+/** Default cap on the summed size of cached response bodies, per client. */
+export const DEFAULT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+/** Error bodies are only used for a short message; never buffer more than this of one. */
+const ERROR_BODY_BYTES = 64 * 1024;
 
 export interface HttpClientOptions {
   baseUrl: string;
@@ -15,6 +26,13 @@ export interface HttpClientOptions {
   retries?: number;
   cacheTtlMs?: number;
   cacheMaxItems?: number;
+  /** Upper bound on the summed estimated memory of cached response bodies. Default 64 MiB; a response bigger than this is not cached. */
+  cacheMaxBytes?: number;
+  /**
+   * Largest response body accepted, measured on the wire (compressed) and again after gzip
+   * decompression. Bigger bodies fail with ResponseTooLarge; they are never truncated. Default 16 MiB.
+   */
+  maxResponseBytes?: number;
   dispatcher?: Dispatcher;
   defaultHeaders?: Record<string, string>;
   /** Retry an upstream 429 once, after its Retry-After (capped by maxRetryAfterMs). Default true. */
@@ -52,7 +70,7 @@ interface InflightEntry { promise: Promise<unknown>; controller: AbortController
 
 export class HttpClient {
   #defaultHeaders: Record<string, string>;
-  private readonly cache: LRUCache<string, { status: number; body: unknown; headers: Record<string, string> }>;
+  private readonly cache: LRUCache<string, { status: number; body: unknown; headers: Record<string, string>; size: number }>;
   private readonly cacheEnabled: boolean;
   private readonly baseUrl: string;
   private readonly userAgent: string;
@@ -60,6 +78,9 @@ export class HttpClient {
   private readonly retries: number;
   private readonly retry429: boolean;
   private readonly maxRetryAfterMs: number;
+  private readonly maxResponseBytes: number;
+  /** Credential values from defaultHeaders, scrubbed from every upstream body and error. */
+  readonly #secrets: string[];
   private readonly dispatcher?: Dispatcher;
   private readonly preflightLimiter?: PreflightLimiter;
   private readonly gate?: UpstreamGateLike;
@@ -69,12 +90,14 @@ export class HttpClient {
 
   constructor(opts: HttpClientOptions) {
     this.#defaultHeaders = opts.defaultHeaders ?? {};
+    this.#secrets = Object.values(this.#defaultHeaders).filter(v => typeof v === 'string' && v.length >= 8);
     this.baseUrl = opts.baseUrl;
     this.userAgent = opts.userAgent ?? 'fedreg-mcp-server/2.0 (+https://github.com/blen-labs/fedreg-mcp-server)';
     this.timeoutMs = opts.timeoutMs ?? 20_000;
     this.retries = opts.retries ?? 3;
     this.retry429 = opts.retry429 ?? true;
     this.maxRetryAfterMs = opts.maxRetryAfterMs ?? 5000;
+    this.maxResponseBytes = Math.max(opts.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES, 1024);
     this.dispatcher = opts.dispatcher;
     this.preflightLimiter = opts.preflightLimiter;
     this.gate = opts.gate;
@@ -82,7 +105,12 @@ export class HttpClient {
     const max = opts.cacheMaxItems ?? 2000;
     const ttl = opts.cacheTtlMs ?? 300_000;
     this.cacheEnabled = max > 0 && ttl > 0;
-    this.cache = new LRUCache({ max: Math.max(max, 1), ttl: Math.max(ttl, 1) });
+    const maxBytes = Math.max(opts.cacheMaxBytes ?? DEFAULT_CACHE_MAX_BYTES, 1024);
+    this.cache = new LRUCache({
+      max: Math.max(max, 1), ttl: Math.max(ttl, 1),
+      // A response bigger than the whole cache is simply not cached.
+      maxSize: maxBytes, maxEntrySize: maxBytes, sizeCalculation: v => Math.max(1, v.size),
+    });
   }
 
   async call<T = unknown>(o: CallOptions): Promise<T> {
@@ -150,7 +178,7 @@ export class HttpClient {
       try {
         return await this.attempt<T>(url, method, o, accept, key, signal);
       } catch (err) {
-        if (err instanceof GateTimeoutError || (err as Error)?.name === 'AbortError') throw err;
+        if (err instanceof GateTimeoutError || err instanceof ResponseTooLargeError || (err as Error)?.name === 'AbortError') throw err;
         const status = err instanceof HttpError ? err.status : 0;
         if (status === 429) {
           const pauseMs = Math.min((err as HttpError).retryAfterMs ?? 1000, this.maxRetryAfterMs);
@@ -198,32 +226,58 @@ export class HttpClient {
         ...(this.dispatcher ? { dispatcher: this.dispatcher } : {}),
       });
 
-      // undici.request returns raw bytes, unlike fetch. Decode before parsing,
-      // reporting upstream errors, or caching the response.
+      // undici.request returns raw bytes, unlike fetch. Bound the body on the wire, then bound
+      // its decompressed size, before parsing, reporting upstream errors, or caching it.
+      const failed = res.statusCode >= 400;
+      const limit = failed ? Math.min(this.maxResponseBytes, ERROR_BODY_BYTES) : this.maxResponseBytes;
+      const what = `${method} ${url}`;
+      const raw = await readCapped(res.body, res.headers['content-length'], limit, what, this.maxResponseBytes, failed);
       const encoding = res.headers['content-encoding'];
-      const decoded = typeof encoding === 'string' && encoding.trim().toLowerCase() === 'gzip'
-        ? new TextDecoder().decode(await decompressGzip(Buffer.from(await res.body.arrayBuffer())))
-        : undefined;
+      let bytes = raw;
+      let text: string;
+      if (failed) {
+        // An error body only feeds a short message: a truncated or undecodable one is just empty.
+        try {
+          if (typeof encoding === 'string' && encoding.trim().toLowerCase() === 'gzip') bytes = await decompressGzip(raw, { maxOutputLength: limit });
+        } catch { bytes = Buffer.alloc(0); }
+        text = this.redact(new TextDecoder().decode(bytes.length > limit ? bytes.subarray(0, limit) : bytes));
+      } else {
+        if (typeof encoding === 'string' && encoding.trim().toLowerCase() === 'gzip') {
+          // Bound the expansion itself, not just the compressed size.
+          try { bytes = await decompressGzip(raw, { maxOutputLength: limit + 1 }); }
+          catch (err) {
+            if ((err as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE') throw new ResponseTooLargeError(what, this.maxResponseBytes);
+            throw err;
+          }
+        }
+        if (bytes.length > limit) throw new ResponseTooLargeError(what, this.maxResponseBytes);
+        text = this.redact(new TextDecoder().decode(bytes));
+      }
 
-      if (res.statusCode >= 400) {
-        const text = decoded ?? await res.body.text();
+      if (failed) {
         const err = new HttpError(`${method} ${url} -> ${res.statusCode}`, res.statusCode, text);
         if (res.statusCode === 429) {
-          const retryAfter = Array.isArray(res.headers['retry-after']) ? res.headers['retry-after'][0] : res.headers['retry-after'];
+          const rawRetryAfter = Array.isArray(res.headers['retry-after']) ? res.headers['retry-after'][0] : res.headers['retry-after'];
+          // Header text is upstream-controlled: scrub and bound it before it reaches logs or errors.
+          const retryAfter = rawRetryAfter === undefined ? undefined : this.redact(String(rawRetryAfter)).slice(0, 64);
           err.name = 'RateLimited';
-          err.retryAfterMs = parseRetryAfter(retryAfter);
+          err.retryAfterMs = parseRetryAfter(rawRetryAfter);
           err.message = `${this.label} is rate limiting this server: ${method} ${url} -> 429 Too Many Requests${retryAfter ? ` (retry-after ${retryAfter})` : ''}`;
           log.warn('upstream.rate_limited', { source: this.label, host: new URL(url).host, ...(retryAfter ? { retryAfter } : {}) });
         }
+        err.message = this.redact(err.message);
         throw err;
       }
 
       let body: unknown;
-      if (accept.startsWith('application/json')) body = decoded === undefined ? await res.body.json() : JSON.parse(decoded);
-      else body = decoded ?? await res.body.text();
+      if (accept.startsWith('application/json')) {
+        // Redact again after decoding: JSON escapes can spell a credential the raw scan missed.
+        body = this.redactValue(JSON.parse(text));
+      } else body = text;
       const headers: Record<string, string> = {};
       for (const [k, v] of Object.entries(res.headers)) headers[k] = Array.isArray(v) ? v.join(',') : String(v ?? '');
-      if (key && this.cacheEnabled) this.cache.set(key, { status: res.statusCode, body, headers });
+      // UTF-16 code units are two bytes each; the parsed value is charged at least as much.
+      if (key && this.cacheEnabled) this.cache.set(key, { status: res.statusCode, body, headers, size: text.length * 2 });
       return body as T;
     } catch (err) {
       if (signal?.aborted) throw abortError();
@@ -231,6 +285,23 @@ export class HttpClient {
     } finally {
       release?.();
     }
+  }
+
+  /** Deep redaction of a decoded JSON value, including object keys. */
+  private redactValue(value: unknown): unknown {
+    if (!this.#secrets.length) return value;
+    if (typeof value === 'string') return this.redact(value);
+    if (Array.isArray(value)) return value.map(v => this.redactValue(v));
+    if (value && typeof value === 'object')
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [this.redact(k), this.redactValue(v)]));
+    return value;
+  }
+
+  /** Replace any configured credential that an upstream echoes back. */
+  private redact(text: string): string {
+    let out = text;
+    for (const secret of this.#secrets) if (out.includes(secret)) out = out.split(secret).join('[REDACTED]');
+    return out;
   }
 
   private cacheKey(url: string, perCallHeaders?: Record<string, string>): string {
@@ -258,6 +329,35 @@ export class HttpClient {
   }
 }
 
+/** Read a response body, failing fast once it exceeds `limit` bytes. */
+async function readCapped(
+  body: AsyncIterable<Uint8Array> & { destroy?: (err?: Error) => void },
+  contentLength: string | string[] | undefined,
+  limit: number,
+  what: string,
+  reportedMax: number,
+  isError: boolean,
+): Promise<Buffer> {
+  const declared = Number(Array.isArray(contentLength) ? contentLength[0] : contentLength);
+  if (!isError && Number.isFinite(declared) && declared > limit) {
+    body.destroy?.();
+    throw new ResponseTooLargeError(what, reportedMax);
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of body) {
+    size += chunk.length;
+    if (size > limit) {
+      body.destroy?.();
+      // An oversized error body is cut off: it only feeds a short message.
+      if (isError) break;
+      throw new ResponseTooLargeError(what, reportedMax);
+    }
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
 /** Retry-After as milliseconds: delta-seconds or an HTTP date; undefined if absent or invalid. */
 function parseRetryAfter(value: string | undefined): number | undefined {
   if (!value) return undefined;
@@ -282,5 +382,13 @@ class GateTimeoutError extends HttpError {
   constructor(message: string) {
     super(message, 429, '');
     this.name = 'RateLimited';
+  }
+}
+
+/** The upstream body exceeded maxResponseBytes (on the wire or decompressed). Never retried, never truncated. */
+export class ResponseTooLargeError extends HttpError {
+  constructor(what: string, max: number) {
+    super(`${what.split('?')[0]} returned more than ${Math.round(max / 1024 / 1024)} MB, which this server does not load. Request less (a smaller part or section, fewer results or fields) and paginate.`, 0, '');
+    this.name = 'ResponseTooLarge';
   }
 }
