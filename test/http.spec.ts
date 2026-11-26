@@ -214,18 +214,17 @@ describe('IPv6 bucketing', () => {
     expect(bucketKey('::ffff:c000:209')).toBe('192.0.2.9');
     expect(bucketKey('unknown')).toBe('unknown');
   });
-  it('shares one limiter bucket across a /64 and counts available/spend without spending on a check', () => {
+  it('shares one limiter bucket across a /64, and reservations are atomic and never refunded past the burst', () => {
     const lim = new IpRateLimiter(0.001, 3);
     expect(lim.allow('2001:db8:9:9::1')).toBe(true);
     expect(lim.allow('2001:db8:9:9:aaaa::2')).toBe(true);
-    expect(lim.available('2001:db8:9:9::3')).toBe(true);
-    expect(lim.available('2001:db8:9:9::3')).toBe(true); // a check spends nothing
-    lim.spend('2001:db8:9:9::4');
-    expect(lim.available('2001:db8:9:9::5')).toBe(false);
+    expect(lim.allow('2001:db8:9:9::3')).toBe(true);
     expect(lim.allow('2001:db8:9:9::6')).toBe(false);
+    lim.refund('2001:db8:9:9::7'); // the same /64
+    expect(lim.allow('2001:db8:9:9::8')).toBe(true);
     expect(lim.allow('2001:db8:9:8::1')).toBe(true); // another /64
-    lim.spend('198.51.100.1'); lim.spend('198.51.100.1'); lim.spend('198.51.100.1'); lim.spend('198.51.100.1');
-    expect(lim.available('198.51.100.1')).toBe(false);
+    for (let i = 0; i < 6; i++) lim.refund('198.51.100.1');
+    expect([1, 2, 3, 4].map(() => lim.allow('198.51.100.1'))).toEqual([true, true, true, false]);
   });
 });
 

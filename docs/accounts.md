@@ -36,7 +36,9 @@ Set the following in the deployment secret manager:
 - `FEDREG_AUTH_PROVIDER=accounts`
 - `FEDREG_PUBLIC_ORIGIN=https://fedreg.mcp.blenlabs.com` (or your own origin)
 - `DATABASE_URL` pointing to the dedicated database
-- `BETTER_AUTH_SECRET`: a random secret of at least 32 characters
+- `BETTER_AUTH_SECRET`: a random secret of at least 32 characters. It also keys the access-token MAC and
+  encrypts confidential-client secrets, so changing it forces every connection and confidential client to
+  re-authorize (see [Bearer token rollout](#bearer-token-rollout) and [Secret rotation](#secret-rotation)).
 - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
 - `ENCRYPTION_KEYS_JSON`: a JSON object mapping key IDs to base64-encoded 32-byte keys
 - `ENCRYPTION_ACTIVE_KEY_ID`: the key ID used for new writes, for example `v1`
@@ -85,12 +87,13 @@ than that plus the slowest token response. A request that cannot get a connectio
 seconds, or then the lock within another 10, is rolled back and answered `503` with `Retry-After: 1`; the client retries.
 
 In memory per replica, before any lock or database lookup: each address may make 20 token or
-revoke requests a second (bursts of 600), and bearer tokens at `/mcp/account` that turn out to be
-invalid spend a budget of 2 a second (bursts of 120) per address, with at most 256 checks in
-flight. Valid tokens, database errors and other limits cost nothing against it, but once an
-address has used up the budget every bearer request from it, valid or not, is answered `429`
-until it refills. IPv6 addresses count per /64 in every per-IP limit. Past a budget the response
-is `429`.
+revoke requests a second (bursts of 600). Bearer tokens at `/mcp/account` are admitted by their
+authenticated format before any failure budget applies (see
+[Bearer token admission](#bearer-token-admission)); only legacy-shaped tokens spend a failure
+budget of 2 a second (bursts of 256) per address. Only a legacy-shaped token proven invalid spends
+it; valid tokens, database errors and other limits cost nothing, and at most 256 legacy and 256
+`at1` checks run at once per address. IPv6 addresses count per /64 in every per-IP limit. Past a
+budget the response is `429`.
 
 ## Isolation and persistence
 
@@ -121,7 +124,8 @@ is `429`.
   The per-execution call budget also applies; `FEDREG_REGS_SUBJECT_RATE_PER_HOUR`
   is ignored in account mode. Browser, key-validation, and OAuth endpoints have
   separate rate limits. Per-IP limits here are fixed (600/min per IP for browser
-  traffic, 6000/min per IP on `/mcp/account` before the per-user limit) and ignore
+  traffic, 6000/min per IP on `/mcp/account` before the per-user limit, with a separate
+  `mcp-ip-legacy:` allowance for legacy-shaped tokens during the rollout below) and ignore
   `FEDREG_IP_RPS`/`FEDREG_IP_BURST`; only the anonymous `/mcp` uses those. Behind a proxy, set `FEDREG_CLIENT_IP_HEADER`
   (Railway: `x-real-ip`): with it unset, Express's `trust proxy` takes the
   rightmost `X-Forwarded-For` entry, which on Railway is its edge, so many users
@@ -130,6 +134,94 @@ is `429`.
   and SameSite, with Secure enabled in production. Responses are non-cacheable.
 - Audit rows record owner, actor, action, and timestamp, not API-key material.
   An operator must define retention for accounts, audit records, and backups.
+
+## Bearer token admission
+
+Hosted connectors share a few egress IPs, so one client sending bad bearer tokens must not lock valid
+users out of an address. Access tokens are issued in an authenticated format,
+`at1.<kid>.<issued-at>.<24 random bytes>.<MAC>`: the MAC is an HMAC-SHA256 keyed from `BETTER_AUTH_SECRET`
+(HKDF with the info string `fedreg-access-token-mac/<kid>`, so each key ID has its own key) over the rest of
+the token. `/mcp/account` admits a token in this order:
+
+1. A value with the `at1.` prefix and a wrong shape, unknown key ID or bad MAC is `401` with no database
+   work, no failure budget and no in-flight slot. Parsing is strict and the MAC is compared in constant time.
+2. A MAC-valid token older than `issued-at + 15 minutes + 60 s` is `401` with no database work. The 60 s is
+   clock skew for this cheap bound only; the database expiry stays authoritative and never gains the skew.
+3. A digest whose completed database check was rejected (revoked, no row, wrong resource, disabled client,
+   unverified user) is remembered for at most 60 s, a fixed time that hits never extend, and never beyond the
+   admission bound of step 2. The cache holds 10,000 digests, never holds database errors or limit responses,
+   and is per replica.
+4. A digest whose own database check recently succeeded carries a "recently validated" marker, set or renewed
+   by each such success (expiry 60 s from then), with the same cap at the admission bound and the same
+   10,000-entry bound. It is a routing hint, not an authorization result: every request still runs its own
+   database check, and a rejection deletes the marker.
+5. Per digest and replica, one check runs at a time for an unknown digest and at most 16 for a marked one, and
+   only running checks take shared in-flight slots (step 6). Further requests for the digest queue FIFO,
+   holding no slot: up to 256 per digest and 4,096 overall, then `429` with `Retry-After` (a known cap: a cold
+   replica serving more than 257 simultaneous first-use calls with one token refuses the excess). When a check
+   finishes its permit passes directly to the oldest queued request (strict arrival order; a new request never
+   overtakes the queue), each running its own fresh check. If the digest was rejected, or its admission bound
+   passes, every queued request is answered `401` at once and the queue is released; if it succeeded, they
+   proceed 16 at a time. A later rejection never renews an existing negative entry's expiry.
+6. A running check takes an in-flight slot (256 per IP bucket) and the `mcp-ip:` flood guard (6,000 a minute),
+   and every admitted request still does the full database check. The failed-token budget is neither
+   consulted nor charged.
+
+So one rejected digest that was never validated costs one lookup per replica while its entry is kept (a
+restart or eviction costs one more). A token validated and then revoked holds at most 16 slots until its
+first rejection is recorded, and none after, so it cannot starve other users of the address. Residual: N
+distinct validated-then-revoked tokens can hold up to 16 x N slots, bounded by the in-flight cap and the flood
+guard, and they need N real tokens. Revocation is never delayed (only rejections are cached), while a
+re-enabled client is accepted again within 60 s. The per-IP in-flight cap and the flood guard remain shared by
+everyone on an address: they are sized for connector traffic, and reaching them takes sustained load of real
+tokens, but they are a capacity limit, not something this removes.
+
+Queued requests wait without a shared slot but are not cancelled when their client disconnects; the queues are
+bounded (256 per digest, 4,096 overall) and drain as checks finish.
+
+Only tokens issued by this server's own OAuth provider go through these checks, and only on `/mcp/account`.
+Everything else is unchanged: Better Auth's own `/api/auth/oauth2/userinfo` still looks the presented token
+up by its digest and treats `at1` and legacy tokens alike (introspection and revocation take the token in the
+request body); the anonymous `/mcp` endpoint reads no token and ignores any bearer value; the base HTTP
+transport (`--http` with `FEDREG_AUTH_PROVIDER` set to `generic-oidc`, `clerk`, `workos` or `auth0`) verifies
+OIDC/JWT bearer tokens by signature, issuer, audience and scope and treats every value, `at1`-shaped or not,
+as a JWT, or accepts requests without a token under `--insecure`; stdio has no bearer tokens.
+
+## Bearer token rollout
+
+The change ships in two releases, with no timers: legacy removal is a code change, so restarts never reopen it
+and every replica runs one rule.
+
+- **Release 1 (dual-accept).** Issues `at1` tokens and accepts both shapes. Legacy-shaped tokens (no `at1.`
+  prefix, issued before this change) use the old failed-token budget, applied only to them: 2 credits a second
+  after a burst as large as the legacy in-flight cap (256 per IP bucket). A credit is reserved before the
+  lookup and refunded unless the token is proven invalid, so concurrent requests cannot share one credit,
+  while valid legacy users keep the previous concurrency and junk still spends. Legacy lookups also have their
+  own flood key (`mcp-ip-legacy:`, 6,000 a minute). Because the budgets, caps and flood keys are separate, a
+  legacy junk flood cannot consume `at1` capacity; conversely, during release 1 one IP can reach up to twice
+  the previous database concurrency (256 on each path) until release 2 removes the legacy path. Rolling back
+  to the previous version is safe: it validates by database digest only, and `at1` tokens are opaque strings
+  to it. Record the time the deploy finished, with no rollback, on every replica.
+- **Release 2 (legacy removed).** Rejects legacy-shaped tokens at the first check. It may ship only after
+  release 1 has been fully deployed, with no rollback, for at least `accessTokenExpiresIn + skew` (15 minutes
+  + 60 s), the longest a legacy token issued by the last old instance can still be valid. Rolling back
+  release 2 to release 1 is safe. Refresh tokens are unaffected by either release.
+- **Changing `accessTokenExpiresIn`.** The admission bound uses the maximum lifetime of any token that may
+  still be valid: when raising or lowering it, keep the larger value in the bound until tokens issued under
+  the old setting have expired.
+
+Deploy prerequisite: all replicas must share `BETTER_AUTH_SECRET` (they already must), because the MAC key
+derives from it; a replica with a different secret refuses other replicas' tokens.
+
+## Secret rotation
+
+Rotating `BETTER_AUTH_SECRET` is breaking, as it was before access-token MACs: confidential clients' secrets
+are stored encrypted with it (`storeClientSecret: 'encrypted'`), so their refresh fails with `invalid_client`
+until they re-register or re-authorize, and every outstanding access token stops verifying and is refused.
+Plan a re-authorization of confidential clients and of all connections. A supported key-ring rotation (old and
+new secrets side by side, key-ID overlap for the MAC, client-secret re-encryption) is not implemented. This is
+separate from [Encryption rotation](#encryption-rotation), which covers the agency-key keyring and does not
+rotate Better Auth's secret.
 
 ## Encryption rotation
 
