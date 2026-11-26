@@ -159,6 +159,12 @@ describe('Streamable HTTP transport', () => {
     expect(read.value).toEqual([{ slug: 'epa', short_name: 'EPA' }, { slug: 'doe', short_name: 'DOE' }]);
   });
 
+  it('ignores the bearer header entirely without authentication, whatever the value looks like', async () => {
+    const { AccessTokenFormat } = await import('../src/accounts/token-admission.js');
+    for (const value of [new AccessTokenFormat('s'.repeat(32)).generate(), 'at1.junk', 'junk'])
+      expect((await rpc('tools/list', {}, { headers: { authorization: `Bearer ${value}` } })).status).toBe(200);
+  });
+
   it('serves OAuth 2.0 Protected Resource Metadata', async () => {
     const r = await fetch(`${base}/.well-known/oauth-protected-resource/mcp`);
     expect(r.status).toBe(200);

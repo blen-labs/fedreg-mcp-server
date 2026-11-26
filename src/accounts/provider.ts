@@ -8,11 +8,13 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/a
 import type { AccountConfig } from './config.js';
 import type { Store } from './store.js';
 import { digest } from './crypto.js';
+import { ACCESS_TOKEN_LIFETIME_SECONDS, ACCESS_TOKEN_SKEW_SECONDS, AccessTokenFormat } from './token-admission.js';
 
 export const SCOPES = ['fedreg:read', 'offline_access'];
 
 /** Same Google / OAuth provider as Data.gov, scoped to personal accounts. */
-export function createAuth(config: AccountConfig, store: Store) {
+export function createAuth(config: AccountConfig, store: Store, now: () => number = Date.now) {
+  const accessTokens = new AccessTokenFormat(config.authSecret, ACCESS_TOKEN_LIFETIME_SECONDS, ACCESS_TOKEN_SKEW_SECONDS, now);
   return betterAuth({
     baseURL: config.origin,
     basePath: '/api/auth',
@@ -58,7 +60,11 @@ export function createAuth(config: AccountConfig, store: Store) {
         storeTokens: { hash: digest },
         refreshTokenReuseInterval: 0,
         rateLimit: { register: { window: 60, max: 120 }, token: { window: 60, max: 1200 } },
-        accessTokenExpiresIn: 900,
+        // Tokens carry an issuer MAC so /mcp/account can refuse made-up ones without a lookup (token-admission.ts).
+        // Leave `prefix.opaqueAccessToken` unset: Better Auth would add it after hashing, and /mcp/account and
+        // the token locks hash the presented value as is.
+        accessTokenExpiresIn: ACCESS_TOKEN_LIFETIME_SECONDS,
+        generateOpaqueAccessToken: () => accessTokens.generate(),
         refreshTokenExpiresIn: 30 * 86400,
         codeExpiresIn: 600,
         allowDynamicClientRegistration: true,
