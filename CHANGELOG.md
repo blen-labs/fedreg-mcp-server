@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-26
+
+### Added
+- add --rotate-keys to re-encrypt stored credentials (accounts)
+
+### Fixed
+- classify and de-duplicate --rotate-keys failures (accounts)
+
+### Changed
+- check every Markdown doc, match the README example to its section
+- fix runnable examples, shell templates, fences and account guide
+- describe what CODEOWNERS does
+- add CODEOWNERS for @blen-labs/maintainers
+
 ## [4.0.2] - 2026-11-26
 
 ### Fixed
@@ -392,7 +406,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.2...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.2...v4.1.0
 [4.0.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.1...v4.0.2
 [4.0.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.0
