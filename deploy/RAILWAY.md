@@ -33,6 +33,7 @@ Set these in **Settings → Variables**:
 | `FEDREG_USER_AGENT` | recommended | `acme-fedreg-mcp/1.0 (contact: ops@acme.com)` | FederalRegister.gov and eCFR appreciate identifiable user agents. |
 | `FEDREG_SANDBOX` | no | `auto` | `isolate` is best on Linux; `auto` falls back to `deno` if available. |
 | `FEDREG_CLIENT_IP_HEADER` | yes | `x-real-ip` | Without it the per-IP rate limit sees Railway's internal proxy addresses, not clients. |
+| `FEDREG_AUTH_LOCK_POOL_SIZE` | no | `10` | Accounts mode: connections per replica for OAuth token locks; budget it against PostgreSQL `max_connections` (see docs/accounts.md). |
 
 ## 3. Authentication
 

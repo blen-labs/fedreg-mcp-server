@@ -6,7 +6,7 @@ import {
   type VersionNegotiationOptions,
 } from '@modelcontextprotocol/client';
 import { startHttp, type HttpHandle } from '../src/server/http.js';
-import { MCP_PROTOCOL_VERSION } from '../src/server/mcpServer.js';
+import { MCP_PROTOCOL_VERSION, MAX_TOOL_INPUT_ELEMENTS } from '../src/server/mcpServer.js';
 import { buildSdk } from '../src/sdk/bindings.js';
 import { getSources } from '../src/sdk/sources/index.js';
 import { buildCorpus } from '../src/search/corpus.js';
@@ -166,6 +166,29 @@ describe('official MCP client SDK', () => {
       // legacy negotiation fails here instead of passing on the tool count alone.
       expect(listed.ttlMs).toBe(300_000);
       expect(listed.cacheScope).toBe('public');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('caps tool input elements, yet the largest legitimate calls pass', async () => {
+    const client = await connect({ mode: 'auto' });
+    try {
+      await client.listTools();
+      // The largest legitimate shapes: execute with every field, search_api with both.
+      const execute = await client.callTool({ name: 'execute', arguments: { code: 'return eval("1")', timeoutMs: 15_000, memoryMb: 64 } });
+      expect(execute.structuredContent).toMatchObject({ error: { name: 'PolicyError' } }); // reached the handler
+      const search = await client.callTool({ name: 'search_api', arguments: { query: 'documents', k: 50 } });
+      expect(search.isError).toBeFalsy();
+      // A crowded argument object is refused before schema validation, whatever the tool.
+      const crowded = Object.fromEntries(Array.from({ length: MAX_TOOL_INPUT_ELEMENTS + 1 }, (_, i) => [`k${i}`, i]));
+      const refused = await client.callTool({ name: 'search_api', arguments: crowded });
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused.content)).toMatch(/maximum of 16 elements/);
+      const nested = { query: 'x', k: 1, pad: Array.from({ length: 400 }, () => 0) };
+      const refusedNested = await client.callTool({ name: 'search_api', arguments: nested });
+      expect(refusedNested.isError).toBe(true);
+      expect(JSON.stringify(refusedNested.content)).toMatch(/maximum of 16 elements/);
     } finally {
       await client.close();
     }

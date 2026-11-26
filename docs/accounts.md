@@ -57,6 +57,32 @@ Production requires HTTPS and checks Host against the configured public origin.
 The production server assumes one trusted proxy hop, as on Railway. Direct public
 hosting or a different proxy chain needs a corresponding trust-proxy review.
 
+## OAuth token locks and request budgets
+
+`/oauth2/token` and `/oauth2/revoke` serialize per user with a
+transaction-scoped PostgreSQL advisory lock, so refresh rotation and replay invalidation never
+interleave across replicas. The lock follows the operation Better Auth runs: only form-encoded
+bodies are accepted, a repeated field takes its last value (a conflicting repeat of `grant_type`
+or of the chosen field is refused with 400), revoke uses `token`, a refresh grant `refresh_token`
+and a code exchange `code`. Unrelated users do not queue together, and requests with nothing to
+lock (client_credentials, missing fields, other media types) take no lock.
+
+These requests use a separate pool of `FEDREG_AUTH_LOCK_POOL_SIZE` connections per replica
+(default 10, 2 to 200) in addition to the main pool, so budget
+`replicas x (main pool + FEDREG_AUTH_LOCK_POOL_SIZE)` against PostgreSQL's `max_connections`. A
+waiting request holds one of them inside an open transaction (`idle in transaction`, with a 10
+second `lock_timeout`), so do not set a shorter `idle_in_transaction_session_timeout` on the role
+than that plus the slowest token response. A request that cannot get a connection within 10
+seconds, or then the lock within another 10, is rolled back and answered `503` with `Retry-After: 1`; the client retries.
+
+In memory per replica, before any lock or database lookup: each address may make 20 token or
+revoke requests a second (bursts of 600), and bearer tokens at `/mcp/account` that turn out to be
+invalid spend a budget of 2 a second (bursts of 120) per address, with at most 256 checks in
+flight. Valid tokens, database errors and other limits cost nothing against it, but once an
+address has used up the budget every bearer request from it, valid or not, is answered `429`
+until it refills. IPv6 addresses count per /64 in every per-IP limit. Past a budget the response
+is `429`.
+
 ## Isolation and persistence
 
 - Ownership comes only from the verified browser session or OAuth token's user.

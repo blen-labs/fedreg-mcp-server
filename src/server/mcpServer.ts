@@ -40,11 +40,20 @@ function cachedSchema(key: string, jsonSchema: unknown): ReturnType<typeof fromJ
   return converted;
 }
 
+/**
+ * Most array elements plus object members one `tools/call` `arguments` payload may contain (SDK
+ * guard against validation-cost DoS, GHSA-46jr-4wx8-v453). The tools take flat scalar arguments:
+ * the largest legitimate call is `execute` with all three of `code`, `timeoutMs` and `memoryMb`
+ * (3 members), so 16 leaves room for new optional fields without admitting a crowded payload.
+ */
+export const MAX_TOOL_INPUT_ELEMENTS = 16;
+
 export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpServer {
   const server = new McpServer(
-    { name: 'fedreg-mcp-server', version: '4.0.0' }, // x-release-version
+    { name: 'fedreg-mcp-server', version: '4.0.1' }, // x-release-version
     {
       capabilities: { tools: {} },
+      maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
       cacheHints: { 'tools/list': LIST_CACHE_HINT, 'server/discover': LIST_CACHE_HINT },
     },
   );

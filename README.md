@@ -144,7 +144,7 @@ These guardrails are in memory (except account mode's per-account window, which 
 3. **Authenticated HTTP serving** (OIDC or accounts) runs user code **only** in the Deno runner — a separate, killable process per execution. `--sandbox isolate` is refused there, and without Deno, `execute` reports `SandboxUnavailable` instead of falling back to in-process execution.
 4. If no runner is available, `search_api` and `describe_schema` still work; `execute` returns `SandboxUnavailable`.
 
-Every execution is bounded: code 256 KiB, returned value 8 MiB (`ResultTooLarge`), logs 1 MiB / 10,000 lines, SDK-call arguments 1 MiB, 100 calls pending at once. At most 8 executions run at once per server and 2 per authenticated subject (`FEDREG_MAX_CONCURRENT_EXECUTIONS`, `FEDREG_MAX_EXECUTIONS_PER_SUBJECT`); a client that cancels or disconnects stops its execution and any upstream calls in flight.
+Every execution is bounded: code 256 KiB, returned value 8 MiB (`ResultTooLarge`), logs 1 MiB / 10,000 lines, SDK-call arguments 1 MiB, 100 calls pending at once. At most 8 executions run at once per server and 2 per authenticated subject (`FEDREG_MAX_CONCURRENT_EXECUTIONS`, `FEDREG_MAX_EXECUTIONS_PER_SUBJECT`); a client that cancels or disconnects stops its execution and any upstream calls in flight. Each upstream response is also bounded in memory, compressed and decompressed: 16 MiB for the Federal Register and regulations.gov, 192 MiB for eCFR (Title 40, the largest full-text title, is about 157 MB). A larger response fails with `ResponseTooLarge`; it is never truncated.
 
 ## Self-hosting (remote HTTP)
 
@@ -209,6 +209,7 @@ The knobs below are every environment variable the server reads at startup (defa
 | `FEDREG_ALLOWED_ORIGINS` | — | Extra browser `Origin`s allowed on `/mcp` (comma-separated exact origins). |
 | `FEDREG_IP_RPS` / `FEDREG_IP_BURST` | `5` / `20` | Per-IP token bucket on the HTTP transport. |
 | `FEDREG_CLIENT_IP_HEADER` | unset | Header your proxy overwrites with the client address (Railway: `x-real-ip`). |
+| `FEDREG_AUTH_LOCK_POOL_SIZE` | `10` | Accounts mode: connections per replica reserved for OAuth token locks (2 to 200); see [docs/accounts.md](docs/accounts.md#oauth-token-locks-and-request-budgets). |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |
 
 CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--help`.

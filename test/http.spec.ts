@@ -3,9 +3,11 @@ import { MockAgent } from 'undici';
 import { gzipSync } from 'node:zlib';
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { IpRateLimiter, clientIp } from '../src/server/ipRateLimiter.js';
+import { IpRateLimiter, clientIp, bucketKey } from '../src/server/ipRateLimiter.js';
 import { SubjectQuota } from '../src/util/quotas.js';
-import { HttpClient } from '../src/util/httpClient.js';
+import { HttpClient, type HttpError, ResponseTooLargeError, DEFAULT_MAX_RESPONSE_BYTES } from '../src/util/httpClient.js';
+import { ECFR_MAX_RESPONSE_BYTES, createEcfrSource } from '../src/sdk/sources/ecfr.js';
+import { createFrSource } from '../src/sdk/sources/fr.js';
 import { UpstreamGate } from '../src/util/upstreamGate.js';
 import { ExecutionLimiter } from '../src/util/executionLimiter.js';
 import { runWithSignal } from '../src/util/executionContext.js';
@@ -171,6 +173,59 @@ describe('clientIp', () => {
   });
   it('falls back to the peer when the trusted header is missing', () => {
     expect(clientIp(req('100.64.0.2'), 'x-real-ip')).toBe('100.64.0.2');
+  });
+  it('uses only a literal address from the trusted header, and unwraps IPv4-mapped IPv6', () => {
+    expect(clientIp(req('100.64.0.2', { 'x-real-ip': 'not-an-ip' }), 'x-real-ip')).toBe('100.64.0.2');
+    expect(clientIp(req('100.64.0.2', { 'x-real-ip': '::ffff:192.0.2.9' }), 'x-real-ip')).toBe('192.0.2.9');
+    expect(clientIp(req('100.64.0.2', { 'x-real-ip': '::ffff:c000:209' }), 'x-real-ip')).toBe('192.0.2.9');
+    expect(clientIp(req('100.64.0.2', { 'x-real-ip': '2001:db8::1' }), 'x-real-ip')).toBe('2001:db8::1');
+  });
+});
+
+describe('IPv6 bucketing', () => {
+  it('maps every address of a /64 to one key, in any notation', () => {
+    const key = '2001:db8:1:2::/64';
+    for (const ip of ['2001:db8:1:2::1', '2001:DB8:1:2:ffff:ffff:ffff:ffff', '2001:0db8:0001:0002:0:0:0:5', '2001:db8:1:2::', '2001:db8:1:2:3::9', '2001:db8:1:2::1%eth0'])
+      expect(bucketKey(ip), ip).toBe(key);
+    expect(bucketKey('2001:db8:1:3::1')).not.toBe(key);
+    expect(bucketKey('::1')).toBe('0:0:0:0::/64');
+  });
+  it('treats every spelling of an IPv4-mapped address as the IPv4 client, through the composed header-to-key path', () => {
+    const fromHeader = (value: string) => bucketKey(clientIp({ socket: { remoteAddress: '100.64.0.2' }, headers: { 'x-real-ip': value } } as unknown as IncomingMessage, 'x-real-ip'));
+    for (const spelling of ['203.0.113.5', '::ffff:203.0.113.5', '::FFFF:203.0.113.5', '::ffff:cb00:7105', '::FFFF:CB00:7105', '0:0:0:0:0:ffff:cb00:7105', '0000:0000:0000:0000:0000:ffff:cb00:7105', '0:0:0:0:0:ffff:203.0.113.5', '::0:ffff:cb00:7105'])
+      expect(fromHeader(spelling), spelling).toBe('203.0.113.5');
+    // A mixed notation that is not IPv4-mapped is a /64 like any other IPv6 address.
+    expect(fromHeader('2001:db8::1.2.3.4')).toBe('2001:db8:0:0::/64');
+    expect(bucketKey('2001:db8:0:0:0:0:102:304')).toBe('2001:db8:0:0::/64');
+    expect(fromHeader('2001:DB8:0:0:1::5')).toBe(fromHeader('2001:db8::7'));
+  });
+  it('canonicalizes in linear time on hostile input, and still unwraps mapped spellings', () => {
+    const timed = (fn: () => unknown) => { const t = Date.now(); fn(); return Date.now() - t; };
+    expect(timed(() => bucketKey(`fe80::1%${'z'.repeat(100_000)}`))).toBeLessThan(50);
+    expect(timed(() => bucketKey('9'.repeat(100_000)))).toBeLessThan(50);
+    expect(timed(() => bucketKey(`::ffff:${'9'.repeat(100_000)}.1`))).toBeLessThan(50);
+    expect(bucketKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64');
+    expect(bucketKey('::ffff:203.0.113.5')).toBe('203.0.113.5');
+    expect(bucketKey('0:0:0:0:0:ffff:cb00:7105')).toBe('203.0.113.5');
+  });
+  it('leaves IPv4, and IPv4-mapped IPv6, as the IPv4 address', () => {
+    expect(bucketKey('192.0.2.9')).toBe('192.0.2.9');
+    expect(bucketKey('::ffff:192.0.2.9')).toBe('192.0.2.9');
+    expect(bucketKey('::ffff:c000:209')).toBe('192.0.2.9');
+    expect(bucketKey('unknown')).toBe('unknown');
+  });
+  it('shares one limiter bucket across a /64 and counts available/spend without spending on a check', () => {
+    const lim = new IpRateLimiter(0.001, 3);
+    expect(lim.allow('2001:db8:9:9::1')).toBe(true);
+    expect(lim.allow('2001:db8:9:9:aaaa::2')).toBe(true);
+    expect(lim.available('2001:db8:9:9::3')).toBe(true);
+    expect(lim.available('2001:db8:9:9::3')).toBe(true); // a check spends nothing
+    lim.spend('2001:db8:9:9::4');
+    expect(lim.available('2001:db8:9:9::5')).toBe(false);
+    expect(lim.allow('2001:db8:9:9::6')).toBe(false);
+    expect(lim.allow('2001:db8:9:8::1')).toBe(true); // another /64
+    lim.spend('198.51.100.1'); lim.spend('198.51.100.1'); lim.spend('198.51.100.1'); lim.spend('198.51.100.1');
+    expect(lim.available('198.51.100.1')).toBe(false);
   });
 });
 
@@ -408,5 +463,115 @@ describe('UpstreamGate', () => {
     for (let i = 0; i < 3; i++) (await gate.acquire())();
     // 1 from the burst, then 2 more at 50/s: at least ~40ms.
     expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+  });
+});
+
+describe('HttpClient upstream I/O budgets', () => {
+  let agent: MockAgent;
+  const ORIGIN = 'https://api.example.gov';
+  const MB = 1024 * 1024;
+  beforeEach(() => { agent = new MockAgent(); agent.disableNetConnect(); });
+  afterEach(async () => { await agent.close(); });
+  const fail = (p: Promise<unknown>) => p.then(() => { throw new Error('expected a rejection'); }, (e: unknown) => e as HttpError);
+  const client = (extra: Record<string, unknown> = {}) =>
+    new HttpClient({ baseUrl: ORIGIN, dispatcher: agent, retries: 2, cacheTtlMs: 0, cacheMaxItems: 0, ...extra });
+
+  it('fails explicitly, without retrying, when a plain body exceeds the budget', async () => {
+    agent.get(ORIGIN).intercept({ path: '/big', method: 'GET' }).reply(200, 'x'.repeat(2 * MB));
+    const err = await fail(client({ maxResponseBytes: MB }).call({ path: '/big' }));
+    expect(err).toBeInstanceOf(ResponseTooLargeError);
+    expect(err).toMatchObject({ name: 'ResponseTooLarge' });
+    expect(err.message).toMatch(/more than 1 MB/);
+    // A retry would have hit MockAgent's "no interceptor" error instead.
+    expect(err.message).not.toMatch(/Mock/i);
+  });
+
+  it('bounds gzip expansion, not just the compressed size (a small body that inflates past the budget)', async () => {
+    const bomb = gzipSync(Buffer.alloc(50 * MB, 0x78));
+    expect(bomb.length).toBeLessThan(MB);
+    agent.get(ORIGIN).intercept({ path: '/bomb.xml', method: 'GET' }).reply(200, bomb, { headers: { 'content-encoding': 'gzip' } });
+    await expect(client({ maxResponseBytes: 4 * MB }).call({ path: '/bomb.xml', accept: 'xml' })).rejects.toBeInstanceOf(ResponseTooLargeError);
+  });
+
+  it('bounds the compressed size on the wire too', async () => {
+    agent.get(ORIGIN).intercept({ path: '/wire.xml', method: 'GET' })
+      .reply(200, Buffer.from('z'.repeat(3 * MB)), { headers: { 'content-encoding': 'gzip' } });
+    await expect(client({ maxResponseBytes: MB }).call({ path: '/wire.xml', accept: 'xml' })).rejects.toBeInstanceOf(ResponseTooLargeError);
+  });
+
+  it('never truncates a body within the budget, byte for byte', async () => {
+    const xml = '<P>' + 'é§—'.repeat(2 * MB) + '</P>';
+    agent.get(ORIGIN).intercept({ path: '/ok.xml', method: 'GET' }).reply(200, gzipSync(xml), { headers: { 'content-encoding': 'gzip' } });
+    const out = await client({ maxResponseBytes: 16 * MB }).call<string>({ path: '/ok.xml', accept: 'xml' });
+    expect(out.length).toBe(xml.length);
+    expect(out === xml).toBe(true);
+  });
+
+  it('keeps legitimate large eCFR documents working through the real source, while the Federal Register source refuses the same size', async () => {
+    // Title 40 is about 157 MB decompressed; a 20 MB slice (over the 16 MiB default) stands in for it.
+    const xml = '<DIV>' + 'a'.repeat(20 * MB) + '</DIV>';
+    expect(ECFR_MAX_RESPONSE_BYTES).toBeGreaterThan(160 * MB);
+    expect(20 * MB).toBeGreaterThan(DEFAULT_MAX_RESPONSE_BYTES);
+    const cfg = { frBaseUrl: `${ORIGIN}/fr`, ecfrBaseUrl: `${ORIGIN}/ecfr`, regsBaseUrl: ORIGIN, userAgent: 't', timeoutMs: 20_000, retries: 0, cacheTtlMs: 0, cacheMaxItems: 0, dispatcher: agent };
+    const up = agent.get(ORIGIN);
+    up.intercept({ path: '/ecfr/versioner/v1/full/2026-10-01/title-40.xml', method: 'GET' }).reply(200, gzipSync(xml), { headers: { 'content-encoding': 'gzip' } });
+    const full = createEcfrSource(cfg).methods.full as (date: string, title: number) => Promise<string>;
+    expect((await full('2026-10-01', 40)) === xml).toBe(true);
+    up.intercept({ path: p => p.startsWith('/fr/documents.json'), method: 'GET' }).reply(200, gzipSync(JSON.stringify({ pad: 'a'.repeat(20 * MB) })), { headers: { 'content-encoding': 'gzip' } });
+    const search = createFrSource(cfg).methods['documents.search'] as (params: object) => Promise<unknown>;
+    await expect(search({})).rejects.toBeInstanceOf(ResponseTooLargeError);
+  });
+
+  it('caches within a byte budget: small responses are served from cache, one larger than the cache is not cached', async () => {
+    const up = agent.get(ORIGIN);
+    up.intercept({ path: '/small', method: 'GET' }).reply(200, { n: 1 });
+    up.intercept({ path: '/huge', method: 'GET' }).reply(200, 'h'.repeat(3000)).times(2);
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100, cacheMaxBytes: 4096, retries: 0 });
+    expect(await c.call({ path: '/small' })).toEqual({ n: 1 });
+    expect(await c.call({ path: '/small' })).toEqual({ n: 1 }); // second intercept absent: cache hit
+    // 3000 chars is ~6000 bytes of memory: over the whole budget, so every call goes upstream.
+    expect(await c.call<string>({ path: '/huge', accept: 'text' })).toHaveLength(3000);
+    expect(await c.call<string>({ path: '/huge', accept: 'text' })).toHaveLength(3000);
+  });
+
+  it('evicts older entries to stay within the total cache bytes', async () => {
+    const up = agent.get(ORIGIN);
+    for (const p of ['/a', '/b', '/a']) up.intercept({ path: p, method: 'GET' }).reply(200, 'q'.repeat(1500));
+    const c = client({ cacheTtlMs: 60_000, cacheMaxItems: 100, cacheMaxBytes: 4096, retries: 0 });
+    await c.call({ path: '/a', accept: 'text' });
+    await c.call({ path: '/b', accept: 'text' }); // 2 x 3000 estimated bytes > 4096: /a is evicted
+    await c.call({ path: '/a', accept: 'text' }); // needs its own upstream call again
+    await agent.assertNoPendingInterceptors();
+  });
+
+  it('redacts configured credentials from error bodies, messages and decoded JSON, keys included', async () => {
+    const SECRET = 'sk-live-0123456789abcdef';
+    const up = agent.get(ORIGIN);
+    up.intercept({ path: '/err', method: 'GET' }).reply(403, `denied for ${SECRET}`);
+    up.intercept({ path: '/err-gz', method: 'GET' }).reply(500, gzipSync(`boom ${SECRET}`), { headers: { 'content-encoding': 'gzip' } });
+    up.intercept({ path: '/rl', method: 'GET' }).reply(429, 'slow', { headers: { 'retry-after': `${SECRET}` } });
+    up.intercept({ path: '/ok', method: 'GET' }).reply(200, { echo: SECRET, nested: [{ [SECRET]: `k=${SECRET}` }], escaped: SECRET.replace('-', '\u002d') });
+    const c = client({ defaultHeaders: { 'X-Api-Key': SECRET }, retries: 0, retry429: false });
+    const e1 = await fail(c.call({ path: '/err' }));
+    expect(e1.bodySnippet).toBe('denied for [REDACTED]');
+    const e2 = await fail(c.call({ path: '/err-gz' }));
+    expect(e2.bodySnippet).toBe('boom [REDACTED]');
+    const e3 = await fail(c.call({ path: '/rl' }));
+    expect(JSON.stringify([e1.message, e2.message, e3.message, e3.bodySnippet])).not.toContain(SECRET);
+    const ok = await c.call({ path: '/ok' });
+    expect(JSON.stringify(ok)).not.toContain(SECRET);
+    expect(ok).toMatchObject({ echo: '[REDACTED]', nested: [{ '[REDACTED]': 'k=[REDACTED]' }] });
+  });
+
+  it('truncates only error bodies, and survives a gzip error body it cannot decode', async () => {
+    const up = agent.get(ORIGIN);
+    up.intercept({ path: '/e1', method: 'GET' }).reply(500, 'e'.repeat(300_000));
+    up.intercept({ path: '/e2', method: 'GET' }).reply(502, 'not gzip at all', { headers: { 'content-encoding': 'gzip' } });
+    const c = client({ retries: 0 });
+    const e1 = await fail(c.call({ path: '/e1' }));
+    expect(e1).toMatchObject({ status: 500 });
+    expect(e1.bodySnippet.length).toBeLessThanOrEqual(64 * 1024);
+    const e2 = await fail(c.call({ path: '/e2' }));
+    expect(e2).toMatchObject({ name: 'HttpError', status: 502, bodySnippet: '' });
   });
 });
