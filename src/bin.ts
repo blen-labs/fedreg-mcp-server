@@ -17,6 +17,7 @@ interface CliArgs {
   insecure: boolean;
   /** Re-encrypt every stored account credential under ENCRYPTION_ACTIVE_KEY_ID, then exit. */
   rotateKeys: boolean;
+  portExplicit: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -28,13 +29,14 @@ function parseArgs(argv: string[]): CliArgs {
     sandbox: (process.env.FEDREG_SANDBOX as SandboxKind | undefined) ?? 'auto',
     insecure: false,
     rotateKeys: false,
+    portExplicit: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--http') args.http = true;
     else if (a === '--insecure') args.insecure = true;
     else if (a === '--rotate-keys') args.rotateKeys = true;
-    else if (a === '--port') args.port = Number(argv[++i]);
+    else if (a === '--port') { args.port = Number(argv[++i]); args.portExplicit = true; }
     else if (a === '--host') { args.host = String(argv[++i]); args.hostExplicit = true; }
     else if (a === '--sandbox') args.sandbox = argv[++i] as SandboxKind;
     else if (a === '--help' || a === '-h') {
@@ -86,7 +88,7 @@ async function rotateKeys(): Promise<void> {
     const { rotated, failed } = await store.rotateAllKeys();
     // Owners only: never key material. Failed rows keep their old key ID; see the guide.
     log.info('accounts.keys_rotated', { activeKeyId: config.keyring.activeId, rotated, failed: failed.length });
-    for (const owner of failed) log.warn('accounts.key_rotation_failed', { owner });
+    for (const { owner, reason } of failed) log.warn('accounts.key_rotation_failed', { owner, reason });
     if (failed.length) process.exitCode = 1;
   } finally {
     await pool.end();
@@ -95,7 +97,11 @@ async function rotateKeys(): Promise<void> {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (args.rotateKeys) return rotateKeys();
+  if (args.rotateKeys) {
+    // It is a one-shot maintenance command: a server option next to it would be silently ignored.
+    if (args.http || args.insecure || args.portExplicit) throw new Error('--rotate-keys runs alone: do not combine it with --http, --insecure or --port.');
+    return rotateKeys();
+  }
 
   const accounts = args.http && process.env.FEDREG_AUTH_PROVIDER?.trim() === 'accounts';
   if (accounts && args.insecure) throw new Error('Account authentication cannot be combined with --insecure');

@@ -462,16 +462,23 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const after = new Store(pool, new Keyring('k2', { k1, k2 }));
     // Batches of one exercise the cursor; rows other tests left under another key fail the same way.
     const { rotated, failed } = await after.rotateAllKeys(1);
-    expect(failed).toContain('rot:a');
-    expect(failed).toContain('rot:d');
+    expect(failed).toContainEqual({ owner: 'rot:a', reason: 'unknown_key' });
+    expect(failed).toContainEqual({ owner: 'rot:d', reason: 'unknown_key' });
     expect(rotated).toBe(2);
-    for (const owner of ['rot:b', 'rot:c']) expect(await after.getKey(owner)).toBe(`key-${owner}`);
+    expect(await after.getKey('rot:b')).toBe('key-rot:b');
+    expect(await after.getKey('rot:c')).toBe('key-rot:c');
     const kids = await pool.query(`SELECT owner, ciphertext->>'kid' AS kid FROM credentials WHERE owner LIKE 'rot:%' ORDER BY owner`);
     expect(kids.rows).toEqual([{ owner: 'rot:a', kid: 'gone' }, { owner: 'rot:b', kid: 'k2' }, { owner: 'rot:c', kid: 'k2' }, { owner: 'rot:d', kid: null }]);
-    const audit = await pool.query(`SELECT action FROM audit_events WHERE tenant='rot:a' AND action='credential.reencrypt_failed'`);
-    expect(audit.rowCount).toBe(1);
-    // A second run has nothing left to migrate; the unopenable rows are reported again.
+    // A damaged ciphertext under a known key fails authentication, not key lookup.
+    await pool.query(`UPDATE credentials SET ciphertext=jsonb_set(ciphertext,'{kid}','"k1"') WHERE owner='rot:b'`);
+    expect((await after.rotateAllKeys(1)).failed).toContainEqual({ owner: 'rot:b', reason: 'authentication' });
+    const audit = await pool.query(`SELECT action FROM audit_events WHERE tenant='rot:a' AND action LIKE 'credential.reencrypt_failed%'`);
+    expect(audit.rows).toEqual([{ action: 'credential.reencrypt_failed:unknown_key:gone' }]);
+    // A rerun reports the unopenable rows again but adds no audit rows for them.
+    const count = async () => Number((await pool.query(`SELECT count(*) FROM audit_events WHERE action LIKE 'credential.reencrypt_failed%'`)).rows[0].count);
+    const before2 = await count();
     expect((await after.rotateAllKeys(1)).rotated).toBe(0);
+    expect(await count()).toBe(before2);
     await expect(after.rotateKeys(0)).rejects.toThrow('Invalid rotation batch size');
   });
   it('runs `--rotate-keys` as an operator command that exits 1 while a row cannot be opened', async () => {
@@ -489,7 +496,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
         FEDREG_PUBLIC_ORIGIN: 'http://127.0.0.1:8080', BETTER_AUTH_SECRET: 's'.repeat(32), GOOGLE_CLIENT_ID: 'g', GOOGLE_CLIENT_SECRET: 's',
         ENCRYPTION_KEYS_JSON: JSON.stringify({ k1: k1.toString('base64'), k2: k2.toString('base64') }), ENCRYPTION_ACTIVE_KEY_ID: 'k2',
       };
-      const run = () => spawnSync(process.execPath, ['--import', 'tsx', 'src/bin.ts', '--rotate-keys'], { cwd: join(fileURLToPath(import.meta.url), '../..'), env, encoding: 'utf8' });
+      const run = (...extra: string[]) => spawnSync(process.execPath, ['--import', 'tsx', 'src/bin.ts', '--rotate-keys', ...extra], { cwd: join(fileURLToPath(import.meta.url), '../..'), env, encoding: 'utf8' });
       const ok = run();
       expect(ok.status, ok.stderr).toBe(0);
       expect(ok.stderr + ok.stdout).toContain('accounts.keys_rotated');
@@ -498,7 +505,14 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
       const bad = run();
       expect(bad.status).toBe(1);
       expect(bad.stderr + bad.stdout).toContain('accounts.key_rotation_failed');
+      expect(bad.stderr + bad.stdout).toContain('unknown_key');
       expect(bad.stderr + bad.stdout).not.toContain('key-cli:a');
+      // A server option beside it would be silently ignored, so it is refused before any database work.
+      for (const option of ['--http', '--insecure', '--port=1']) {
+        const refused = run(...option.split('='));
+        expect(refused.status, option).toBe(1);
+        expect(refused.stderr + refused.stdout, option).toContain('--rotate-keys runs alone');
+      }
     } finally {
       await cliPool.end();
       await pool.query(`DROP SCHEMA ${cliSchema} CASCADE`);

@@ -4,6 +4,16 @@ import { type Keyring, type Sealed, digest } from './crypto.js';
 /** Personal credential owner derived exclusively from the authenticated user. */
 export const personalOwner = (userId: string) => `user:${userId}`;
 
+/** Why a stored credential could not be re-encrypted. Coarse on purpose: it never carries key material. */
+export type RotationFailure = { owner: string; reason: 'unknown_key' | 'authentication' | 'other' };
+
+function failureReason(error: unknown): RotationFailure['reason'] {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'Unsupported ciphertext') return 'unknown_key';
+  if (/authenticate/i.test(message)) return 'authentication';
+  return 'other';
+}
+
 export class Store {
   constructor(
     readonly pool: Pool,
@@ -132,7 +142,7 @@ export class Store {
    * order after `after`. A row that cannot be opened is reported and left as it was, so one bad row
    * never blocks the rest.
    */
-  async rotateKeys(batchSize = 100, after?: string): Promise<{ rotated: number; failed: string[]; next?: string }> {
+  async rotateKeys(batchSize = 100, after?: string): Promise<{ rotated: number; failed: RotationFailure[]; next?: string }> {
     if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 1000)
       throw new Error('Invalid rotation batch size');
     const client = await this.pool.connect();
@@ -144,19 +154,23 @@ export class Store {
         [this.keyring.activeId, batchSize, after ?? null],
       );
       let rotated = 0;
-      const failed: string[] = [];
+      const failed: RotationFailure[] = [];
       for (const row of rows.rows as { owner: string; ciphertext: Sealed }[]) {
         const context = `regulations.gov:${row.owner}`;
         let sealed: Sealed;
         try {
           sealed = this.keyring.seal(this.keyring.open(row.ciphertext, context), context);
-        } catch {
-          failed.push(row.owner);
-          await client.query('INSERT INTO audit_events(tenant,actor,action) VALUES($1,$2,$3)', [
-            row.owner,
-            'service-operator',
-            'credential.reencrypt_failed',
-          ]);
+        } catch (error) {
+          const reason = failureReason(error);
+          failed.push({ owner: row.owner, reason });
+          // One audit row per owner, reason and key ID, so scheduled reruns do not grow the table.
+          const kid = typeof row.ciphertext?.kid === 'string' ? row.ciphertext.kid.slice(0, 64) : 'none';
+          const action = `credential.reencrypt_failed:${reason}:${kid}`;
+          await client.query(
+            `INSERT INTO audit_events(tenant,actor,action) SELECT $1,$2,$3
+             WHERE NOT EXISTS (SELECT 1 FROM audit_events WHERE tenant=$1 AND action=$3)`,
+            [row.owner, 'service-operator', action],
+          );
           continue;
         }
         await client.query('UPDATE credentials SET ciphertext=$2 WHERE owner=$1', [row.owner, sealed]);
@@ -178,9 +192,9 @@ export class Store {
     }
   }
   /** Rotates every credential, batch by batch. Rows that cannot be opened are reported, not retried. */
-  async rotateAllKeys(batchSize = 100): Promise<{ rotated: number; failed: string[] }> {
+  async rotateAllKeys(batchSize = 100): Promise<{ rotated: number; failed: RotationFailure[] }> {
     let rotated = 0;
-    const failed: string[] = [];
+    const failed: RotationFailure[] = [];
     let after: string | undefined;
     do {
       const batch = await this.rotateKeys(batchSize, after);
