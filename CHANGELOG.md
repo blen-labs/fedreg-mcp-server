@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-11-26
+
+### Fixed
+- admit bearer tokens by authenticated format before the failure budget (security)
+
+### Changed
+- drive the legacy budget with the replica clock instead of fake timers (accounts)
+
 ## [4.1.0] - 2026-11-26
 
 ### Added
@@ -406,7 +414,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.1...HEAD
+[4.1.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.2...v4.1.0
 [4.0.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.1...v4.0.2
 [4.0.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.1
