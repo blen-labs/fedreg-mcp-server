@@ -388,7 +388,7 @@ export async function createAccountApp(
   const legacySlots = new Slots(maxLegacyChecks);
   // The legacy path's own failure budget, as large as its in-flight cap so valid legacy users keep the
   // concurrency they had; junk still spends credits at 2 a second once the burst is used.
-  const failedTokens = new IpRateLimiter(FAILED_TOKEN_RPS, maxLegacyChecks);
+  const failedTokens = new IpRateLimiter(FAILED_TOKEN_RPS, maxLegacyChecks, now);
   app.all(ACCOUNT_MCP_PATH, async (req, res) => {
     const challenge = (status: number, error: string) =>
       res

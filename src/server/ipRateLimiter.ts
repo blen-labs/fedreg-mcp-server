@@ -7,7 +7,7 @@ import { LRUCache } from 'lru-cache';
  */
 export class IpRateLimiter {
   private readonly buckets: LRUCache<string, { tokens: number; updatedAt: number }>;
-  constructor(private readonly rps: number, private readonly burst: number) {
+  constructor(private readonly rps: number, private readonly burst: number, private readonly clock: () => number = Date.now) {
     // An idle bucket refills to `burst` within burst/rps seconds; after that it is
     // indistinguishable from a new one, so it can be dropped. Bounded so a flood of
     // distinct addresses cannot grow memory without limit.
@@ -37,7 +37,7 @@ export class IpRateLimiter {
   }
 
   private refilled(key: string) {
-    const now = Date.now();
+    const now = this.clock();
     const b = this.buckets.get(key) ?? { tokens: this.burst, updatedAt: now };
     b.tokens = Math.min(this.burst, b.tokens + ((now - b.updatedAt) / 1000) * this.rps);
     b.updatedAt = now;

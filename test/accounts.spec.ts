@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Agent, createServer, get as httpGet, request as httpRequest, type Server } from 'node:http';
 import { createServer as createNetServer, type AddressInfo, type Socket } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
@@ -1318,10 +1318,10 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     let legacyJunk = new Set<string>();
     let release!: () => void;
     let held = new Promise<void>(resolve => (release = resolve));
-    // Only Date is faked: the failure budget refills against it, with no sleeping in the test.
-    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
+    // The replica reads this clock for the failure budget's refill, so the test advances it instead of sleeping.
+    let clock = Date.now();
     try {
-      await countingReplica({ maxLegacyChecksInFlight: 24 }, async lookups => {
+      await countingReplica({ maxLegacyChecksInFlight: 24, now: () => clock }, async lookups => {
         try {
           let nextAt1 = 0;
           // Mixed issuers: both shapes are accepted from the same address.
@@ -1329,7 +1329,7 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
           expect((await mcpPost(at1[nextAt1++]!, { 'x-real-ip': ip })).status).toBe(ADMITTED);
           const shared = (await bucketCount(`mcp-ip:${ip}`))!;
           let at1Requests = 1;
-          const startedAt = Date.now();
+          const startedAt = clock;
           const rounds = 12;
           for (let round = 0; round < rounds; round++) {
             legacyJunk = new Set();
@@ -1348,10 +1348,10 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
             release();
             const statuses = await Promise.all(burst);
             expect(statuses.every(s => s === 401 || s === 429)).toBe(true);
-            vi.advanceTimersByTime(6_000);
+            clock += 6_000;
           }
           // Legacy lookups are bounded by the failure budget: the burst (the legacy cap, 24 here) + 2/s over the elapsed time, not by slots.
-          const elapsed = (Date.now() - startedAt) / 1000;
+          const elapsed = (clock - startedAt) / 1000;
           expect(elapsed).toBeGreaterThanOrEqual(60);
           const legacyLookups = lookups.of.length - at1Requests;
           expect(legacyLookups, `${legacyLookups} legacy lookups in ${elapsed}s`).toBeLessThanOrEqual(24 + 2 * elapsed);
@@ -1369,7 +1369,6 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     } finally {
       legacyJunk = new Set();
       release(); // never leave a held lookup behind
-      vi.useRealTimers();
     }
   });
 
