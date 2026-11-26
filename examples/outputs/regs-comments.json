@@ -1,0 +1,25 @@
+{
+  "capturedOn": "2026-11-26",
+  "synthetic": true,
+  "source": "Synthetic: no regulations.gov key was available to capture a live run. The rule and comment values are made up.",
+  "value": {
+    "rule": {
+      "document_number": "2024-00001",
+      "title": "Example rule",
+      "publication_date": "2024-01-02"
+    },
+    "totalComments": 2,
+    "latest": [
+      {
+        "id": "EXAMPLE-0002",
+        "title": "Comment one",
+        "postedDate": "2024-02-01T00:00:00Z"
+      },
+      {
+        "id": "EXAMPLE-0003",
+        "title": "Comment two",
+        "postedDate": "2024-01-31T00:00:00Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "capturedOn": "2026-11-26",
+  "synthetic": false,
+  "source": "eCFR API (ecfr.gov), public domain U.S. government data",
+  "value": {
+    "matchingSections": 3135,
+    "byTitle": [
+      {
+        "title": "40",
+        "heading": "Protection of Environment",
+        "sections": 3131
+      },
+      {
+        "title": "48",
+        "heading": "Federal Acquisition Regulations System",
+        "sections": 4
+      }
+    ],
+    "best": [
+      {
+        "title": "40",
+        "part": "98",
+        "section": "98.410",
+        "heading": "Definition of the source category."
+      },
+      {
+        "title": "40",
+        "part": "98",
+        "section": "98.411",
+        "heading": "Reporting threshold."
+      },
+      {
+        "title": "40",
+        "part": "98",
+        "section": "98.414",
+        "heading": "Monitoring and QA/QC requirements."
+      }
+    ]
+  }
+}

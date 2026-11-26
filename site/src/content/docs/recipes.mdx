@@ -1,12 +1,16 @@
 ---
 title: Recipes
-description: Three programs that your assistant can run with execute, and tips for programs of your own.
+description: Programs that your assistant can run with execute, with the output of each, and tips for programs of your own.
 ---
 
 import Example from '../../components/Example.astro';
+import Output from '../../components/Output.astro';
 
 Each program runs as written in `execute`. They are plain JavaScript with top-level `await` and
-`return`, and the repository tests each one.
+`return`, each returns its result, and the repository tests each one. Under each program is what
+it returned when it was captured, with the date and the source. The programs that use only the
+Federal Register and the eCFR were run against the live APIs. The one that needs a regulations.gov
+key shows labelled synthetic output.
 
 ## Rules on a topic
 
@@ -14,11 +18,24 @@ Each program runs as written in `execute`. They are plain JavaScript with top-le
 
 <Example file="fr-search.js" />
 
+<Output file="fr-search.js" />
+
+## A section of the CFR, with the rules around it
+
+The current text of one eCFR section, with the newest Federal Register rules that affect the same CFR part. The
+text is cut to a short excerpt, because the XML of a section can be large.
+
+<Example file="ecfr-section.js" />
+
+<Output file="ecfr-section.js" />
+
 ## Where a topic appears in the CFR
 
-Counts by CFR hierarchy for one agency, then the best matching sections.
+Counts by CFR title for one agency, then the best matching sections.
 
 <Example file="ecfr-search.js" />
+
+<Output file="ecfr-search.js" />
 
 ## Comments on a rule
 
@@ -26,6 +43,17 @@ From a Federal Register rule to its regulations.gov document, then the public co
 it. This one needs a [regulations.gov key](/keys/).
 
 <Example file="regs-comments.js" />
+
+<Output file="regs-comments.js" />
+
+## When nothing matches
+
+A search with no match is not an error. The call succeeds, `count` is 0, and `results` is empty.
+Check for that before you read `results[0]`.
+
+<Example file="no-match.js" />
+
+<Output file="no-match.js" />
 
 ## Tips
 

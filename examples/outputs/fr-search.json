@@ -1,0 +1,45 @@
+{
+  "capturedOn": "2026-11-26",
+  "synthetic": false,
+  "source": "Federal Register API (federalregister.gov), public domain U.S. government data",
+  "value": {
+    "count": 92,
+    "results": [
+      {
+        "document_number": "2026-24084",
+        "title": "Technical Updates to the RCRA Hazardous Waste Permitting Regulations-Permitting Technical Updates Rule",
+        "publication_date": "2026-11-27",
+        "type": "Proposed Rule",
+        "html_url": "https://www.federalregister.gov/documents/2026/11/27/2026-24084/technical-updates-to-the-rcra-hazardous-waste-permitting-regulations-permitting-technical-updates"
+      },
+      {
+        "document_number": "2026-23580",
+        "title": "Approval and Promulgation of State Air Quality Plans for Designated Facilities and Pollutants; Texas; Control of Emissions From Existing Municipal Solid Waste Landfills",
+        "publication_date": "2026-11-19",
+        "type": "Rule",
+        "html_url": "https://www.federalregister.gov/documents/2026/11/19/2026-23580/approval-and-promulgation-of-state-air-quality-plans-for-designated-facilities-and-pollutants-texas"
+      },
+      {
+        "document_number": "2026-22647",
+        "title": "Air Plan Revisions; Arizona; Maricopa County Air Quality Department; New Source Review; Emission Reduction Credits",
+        "publication_date": "2026-11-05",
+        "type": "Rule",
+        "html_url": "https://www.federalregister.gov/documents/2026/11/05/2026-22647/air-plan-revisions-arizona-maricopa-county-air-quality-department-new-source-review-emission"
+      },
+      {
+        "document_number": "2026-22585",
+        "title": "Approval and Promulgation of State Plans for Designated Facilities and Pollutants; Arizona; Control of Emissions From Existing Municipal Solid Waste Landfills",
+        "publication_date": "2026-11-05",
+        "type": "Proposed Rule",
+        "html_url": "https://www.federalregister.gov/documents/2026/11/05/2026-22585/approval-and-promulgation-of-state-plans-for-designated-facilities-and-pollutants-arizona-control-of"
+      },
+      {
+        "document_number": "2026-22584",
+        "title": "Approval and Promulgation of State Plans for Designated Facilities and Pollutants; West Virginia; Control of Emissions From Existing Municipal Solid Waste Landfills",
+        "publication_date": "2026-11-05",
+        "type": "Rule",
+        "html_url": "https://www.federalregister.gov/documents/2026/11/05/2026-22584/approval-and-promulgation-of-state-plans-for-designated-facilities-and-pollutants-west-virginia"
+      }
+    ]
+  }
+}

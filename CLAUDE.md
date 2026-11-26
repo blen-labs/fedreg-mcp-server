@@ -20,9 +20,11 @@ pnpm test test/search.spec.ts -t "bm25" # single test by name (pair with file pa
 pnpm lint                               # eslint . — typescript-eslint recommended + type-aware promise rules in src/ (floating/misused promises, no console except stderr), react-hooks in web/, plus core rules kept from the old Biome setup (no-template-curly-in-string, default-case-last, array-callback-return, no-self-compare, radix, no-constructor-return)
 pnpm test:web                           # build web, then Playwright + axe (web/e2e); journey.spec.ts needs TEST_DATABASE_URL + Deno
 pnpm kit:check                          # shared portal kit vs web/portal-kit.json (test/portal-kit.spec.ts runs it too)
+pnpm docs:check                         # every code fence in README, CONTRIBUTING, docs/, deploy/ and the site pages names a language (test/docs-source.spec.ts runs it too, and runs every shell block with stub commands)
 pnpm build                              # tsc -p tsconfig.build.json && pnpm build:web (Vite → dist/web) && chmod
 pnpm dev                                # tsx src/bin.ts (stdio)
 pnpm dev --http                         # HTTP transport; also --port, --host, --sandbox, --insecure
+pnpm dev --rotate-keys                  # account mode only: re-encrypt stored keys under ENCRYPTION_ACTIVE_KEY_ID, then exit (not combinable with --http/--insecure/--port)
 ```
 
 - In `pnpm build`, the `|| true` guards only the `chmod` — a `tsc` failure DOES fail the build. `pnpm typecheck` remains the broader gate (it also covers `test/**`, which the build config excludes).
@@ -39,7 +41,7 @@ pnpm dev --http                         # HTTP transport; also --port, --host, -
 
 Request flow (both transports converge on the same tool catalog):
 
-```
+```text
 stdio | Streamable HTTP (+OAuth, per-IP bucket, quotas)     src/server/{stdio,http}.ts
   -> buildMcpServer (SDK v2 McpServer, 3 registerTool calls) src/server/mcpServer.ts, toolCatalog.ts
   -> tools: searchApi | describeSchema | execute             src/tools/

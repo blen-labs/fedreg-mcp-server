@@ -9,8 +9,14 @@ so the files aren't runnable with plain `node`.
 | File | Demonstrates |
 |------|--------------|
 | [`fr-search.js`](./fr-search.js) | Federal Register: structured `documents.search` with `conditions`, `fields`, ordering. |
-| [`ecfr-search.js`](./ecfr-search.js) | eCFR: `counts_hierarchy` + paginated `search.results` for one agency. |
+| [`ecfr-search.js`](./ecfr-search.js) | eCFR: `counts_hierarchy` + `search.results` for one agency. |
+| [`ecfr-section.js`](./ecfr-section.js) | eCFR + Federal Register: the current text of one CFR section and the newest related rules. |
+| [`no-match.js`](./no-match.js) | A search that matches nothing: `count` 0, empty `results`, no error. |
 | [`regs-comments.js`](./regs-comments.js) | regulations.gov: the fr → regs bridge — find a rule, then pull its public comments via `objectId`. |
+
+Each program returns a bounded result. [`outputs/`](./outputs/) holds what each returned when it
+was captured, with the date and source; a `synthetic` output is not a live capture. The
+[recipes page](https://fedreg.mcp.blenlabs.com/docs/recipes/) shows both.
 
 ## Tips for sandboxed code
 

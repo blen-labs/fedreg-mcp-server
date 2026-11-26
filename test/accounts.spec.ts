@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, get as httpGet, type Server } from 'node:http';
 import { createServer as createNetServer, type AddressInfo, type Socket } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -450,6 +451,72 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     expect((await mcp(a.access_token, 'return await regs.documents.search();')).body).toContain('Save a regulations.gov API key');
     expect((await mcp(a.access_token)).body).toContain('42');
     expect(await store.getKey(personalOwner(bob.id))).toBe(key2);
+  });
+  it('rotates stored keys past a row it cannot open, batch by batch', async () => {
+    const k1 = randomBytes(32), k2 = randomBytes(32);
+    const before = new Store(pool, new Keyring('k1', { k1 }));
+    for (const owner of ['rot:a', 'rot:b', 'rot:c', 'rot:d']) await before.saveKey(owner, `key-${owner}`, owner);
+    // The first row in owner order points at a key that is no longer in the keyring; another lost its key ID.
+    await pool.query(`UPDATE credentials SET ciphertext=jsonb_set(ciphertext,'{kid}','"gone"') WHERE owner='rot:a'`);
+    await pool.query(`UPDATE credentials SET ciphertext=ciphertext - 'kid' WHERE owner='rot:d'`);
+    const after = new Store(pool, new Keyring('k2', { k1, k2 }));
+    // Batches of one exercise the cursor; rows other tests left under another key fail the same way.
+    const { rotated, failed } = await after.rotateAllKeys(1);
+    expect(failed).toContainEqual({ owner: 'rot:a', reason: 'unknown_key' });
+    expect(failed).toContainEqual({ owner: 'rot:d', reason: 'unknown_key' });
+    expect(rotated).toBe(2);
+    expect(await after.getKey('rot:b')).toBe('key-rot:b');
+    expect(await after.getKey('rot:c')).toBe('key-rot:c');
+    const kids = await pool.query(`SELECT owner, ciphertext->>'kid' AS kid FROM credentials WHERE owner LIKE 'rot:%' ORDER BY owner`);
+    expect(kids.rows).toEqual([{ owner: 'rot:a', kid: 'gone' }, { owner: 'rot:b', kid: 'k2' }, { owner: 'rot:c', kid: 'k2' }, { owner: 'rot:d', kid: null }]);
+    // A damaged ciphertext under a known key fails authentication, not key lookup.
+    await pool.query(`UPDATE credentials SET ciphertext=jsonb_set(ciphertext,'{kid}','"k1"') WHERE owner='rot:b'`);
+    expect((await after.rotateAllKeys(1)).failed).toContainEqual({ owner: 'rot:b', reason: 'authentication' });
+    const audit = await pool.query(`SELECT action FROM audit_events WHERE tenant='rot:a' AND action LIKE 'credential.reencrypt_failed%'`);
+    expect(audit.rows).toEqual([{ action: 'credential.reencrypt_failed:unknown_key:gone' }]);
+    // A rerun reports the unopenable rows again but adds no audit rows for them.
+    const count = async () => Number((await pool.query(`SELECT count(*) FROM audit_events WHERE action LIKE 'credential.reencrypt_failed%'`)).rows[0].count);
+    const before2 = await count();
+    expect((await after.rotateAllKeys(1)).rotated).toBe(0);
+    expect(await count()).toBe(before2);
+    await expect(after.rotateKeys(0)).rejects.toThrow('Invalid rotation batch size');
+  });
+  it('runs `--rotate-keys` as an operator command that exits 1 while a row cannot be opened', async () => {
+    const k1 = randomBytes(32), k2 = randomBytes(32);
+    // Its own schema: the command rotates every row it finds, and other tests' rows use another key.
+    const cliSchema = `${schema}_cli`;
+    const cliPool = new Pool({ connectionString: database, options: `-c search_path=${cliSchema}` });
+    await pool.query(`CREATE SCHEMA ${cliSchema}`);
+    try {
+      const before = new Store(cliPool, new Keyring('k1', { k1 }));
+      await before.initialize();
+      await before.saveKey('cli:a', 'key-cli:a', 'cli:a');
+      const env = {
+        ...process.env, NODE_ENV: 'test', PGOPTIONS: `-c search_path=${cliSchema}`, DATABASE_URL: database!,
+        FEDREG_PUBLIC_ORIGIN: 'http://127.0.0.1:8080', BETTER_AUTH_SECRET: 's'.repeat(32), GOOGLE_CLIENT_ID: 'g', GOOGLE_CLIENT_SECRET: 's',
+        ENCRYPTION_KEYS_JSON: JSON.stringify({ k1: k1.toString('base64'), k2: k2.toString('base64') }), ENCRYPTION_ACTIVE_KEY_ID: 'k2',
+      };
+      const run = (...extra: string[]) => spawnSync(process.execPath, ['--import', 'tsx', 'src/bin.ts', '--rotate-keys', ...extra], { cwd: join(fileURLToPath(import.meta.url), '../..'), env, encoding: 'utf8' });
+      const ok = run();
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(ok.stderr + ok.stdout).toContain('accounts.keys_rotated');
+      expect(await new Store(cliPool, new Keyring('k2', { k2 })).getKey('cli:a')).toBe('key-cli:a');
+      await cliPool.query(`UPDATE credentials SET ciphertext=jsonb_set(ciphertext,'{kid}','"gone"') WHERE owner='cli:a'`);
+      const bad = run();
+      expect(bad.status).toBe(1);
+      expect(bad.stderr + bad.stdout).toContain('accounts.key_rotation_failed');
+      expect(bad.stderr + bad.stdout).toContain('unknown_key');
+      expect(bad.stderr + bad.stdout).not.toContain('key-cli:a');
+      // A server option beside it would be silently ignored, so it is refused before any database work.
+      for (const option of ['--http', '--insecure', '--port=1']) {
+        const refused = run(...option.split('='));
+        expect(refused.status, option).toBe(1);
+        expect(refused.stderr + refused.stdout, option).toContain('--rotate-keys runs alone');
+      }
+    } finally {
+      await cliPool.end();
+      await pool.query(`DROP SCHEMA ${cliSchema} CASCADE`);
+    }
   });
   it('keeps upstream error status without the key, and keeps public sources working when a saved key cannot be read', async () => {
     const a = await token();

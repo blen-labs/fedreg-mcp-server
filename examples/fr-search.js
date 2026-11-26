@@ -13,7 +13,7 @@ const recent = await fr.documents.search({
     type: ['RULE', 'PRORULE'],
   },
   fields: ['document_number', 'title', 'publication_date', 'type', 'html_url'],
-  per_page: 25,
+  per_page: 5,
   order: 'newest',
 });
-return recent;
+return { count: recent.count, results: recent.results };
