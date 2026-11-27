@@ -36,12 +36,13 @@ function setting(name: string, value: string | undefined): string | undefined {
   return value.trim();
 }
 
-/** A finite number from a setting, or `fallback` when unset. Blank or non-numeric is an error, never 0 or NaN. */
+/** A finite, non-negative number from a setting, or `fallback` when unset. Blank, non-numeric or negative is an error, never 0 or NaN. */
 function numeric(name: string, value: string | undefined, fallback: number): number {
   const v = setting(name, value);
   if (v === undefined) return fallback;
   const n = Number(v);
   if (!Number.isFinite(n)) throw new Error(`${name} must be a number, got '${v}'.`);
+  if (n < 0) throw new Error(`${name} must not be negative, got '${v}'.`);
   return n;
 }
 
@@ -54,14 +55,15 @@ function parsePort(name: string, value: string | undefined): number {
 /** The value after an option, or an error when the command line ends first. */
 function optionValue(argv: string[], i: number): string {
   const v = argv[i + 1];
-  if (v === undefined) throw new Error(`Option '${argv[i]}' needs a value. Run with --help to see the options.`);
+  if (v === undefined || v.startsWith('--')) throw new Error(`Option '${argv[i]}' needs a value. Run with --help to see the options.`);
   return v;
 }
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     http: false,
-    port: parsePort('PORT', process.env.PORT),
+    // PORT is read after the loop, and only when --port did not override it.
+    port: 8080,
     // A blank HOST or FEDREG_SANDBOX is the same as none; an unexpanded placeholder is a mistake.
     host: process.env.HOST?.trim() ? setting('HOST', process.env.HOST)! : '0.0.0.0',
     hostExplicit: Boolean(process.env.HOST?.trim()),
@@ -87,6 +89,7 @@ function parseArgs(argv: string[]): CliArgs {
     // A mistyped --http must not quietly start the stdio transport instead.
     else throw new Error(`Unknown option '${a}'. Run with --help to see the options.`);
   }
+  if (!args.portExplicit) args.port = parsePort('PORT', process.env.PORT);
   if (!SANDBOXES.includes(args.sandbox)) throw new Error(`Unknown sandbox '${args.sandbox}'. Use auto, isolate or deno.`);
   // An unauthenticated server runs anyone's code: keep it on this machine unless told otherwise.
   if (args.insecure && !args.hostExplicit) args.host = '127.0.0.1';
@@ -182,10 +185,7 @@ async function main(): Promise<void> {
     upstreamRatePerSec: atLeastOne(process.env.FEDREG_UPSTREAM_RATE_PER_SEC, UPSTREAM_DEFAULTS.ratePerSec),
     upstreamMaxWaitMs: atLeastOne(process.env.FEDREG_UPSTREAM_MAX_WAIT_MS, UPSTREAM_DEFAULTS.maxWaitMs),
     publicMaxCallsPerExecute: atLeastOne(process.env.FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE, PUBLIC_MAX_CALLS_PER_EXECUTE),
-    regsMaxCallsPerExecute: (() => {
-      const n = numeric('FEDREG_REGS_MAX_CALLS_PER_EXECUTE', process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE, 30);
-      return Number.isFinite(n) && n >= 0 ? n : 30;
-    })(),
+    regsMaxCallsPerExecute: numeric('FEDREG_REGS_MAX_CALLS_PER_EXECUTE', process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE, 30),
     // Require >= 1: a rate of 0 would silently block ALL regs calls (it is NOT
     // "unlimited"). To disable regs, leave FEDREG_REGS_API_KEY unset instead.
     regsRatePerHour: atLeastOne(process.env.FEDREG_REGS_RATE_PER_HOUR, 1000),

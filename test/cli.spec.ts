@@ -49,10 +49,16 @@ describe('command line', () => {
     expectRefusal(bin([], { PORT: '80.5' }), 'PORT must be a whole number');
   });
 
+  it('does not read PORT when --port overrides it, and does not take a flag for a value', () => {
+    expectRefusal(bin(['--port', '70000'], { PORT: 'abc' }), '--port must be a whole number');
+    expectRefusal(bin(['--host', '--insecure']), "Option '--host' needs a value");
+  });
+
   it('refuses blank or non-numeric numeric settings instead of reading them as 0', () => {
     for (const name of ['FEDREG_UPSTREAM_TIMEOUT_MS', 'FEDREG_UPSTREAM_RETRIES', 'FEDREG_CACHE_TTL_MS', 'FEDREG_CACHE_MAX_ITEMS', 'FEDREG_REGS_MAX_CALLS_PER_EXECUTE', 'FEDREG_SUBJECT_DAILY_QUOTA']) {
       expectRefusal(bin(['--http', '--insecure'], { [name]: '' }), `${name} is blank`);
       expectRefusal(bin(['--http', '--insecure'], { [name]: 'lots' }), `${name} must be a number, got 'lots'`);
+      expectRefusal(bin(['--http', '--insecure'], { [name]: '-1' }), `${name} must not be negative`);
     }
   });
 
