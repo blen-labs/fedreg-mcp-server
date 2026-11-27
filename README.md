@@ -260,6 +260,7 @@ The knobs below are every environment variable the server reads at startup (defa
 | `FEDREG_CLIENT_IP_HEADER` | unset | Header your proxy overwrites with the client address (Railway: `x-real-ip`). |
 | `FEDREG_AUTH_LOCK_POOL_SIZE` | `10` | Accounts mode: connections per replica reserved for OAuth token locks (2 to 200); see [docs/accounts.md](docs/accounts.md#oauth-token-locks-and-request-budgets). |
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |
+| `RAILWAY_GIT_COMMIT_SHA` | set by Railway | The commit Railway built (GitHub-sourced deployments); `/health` reports it as `commit`, or `null` when unset or not a full SHA. Do not set it yourself. |
 
 CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--rotate-keys` (account mode: re-encrypt stored keys, see [docs/accounts.md](docs/accounts.md#encryption-rotation)), `--help`.
 
