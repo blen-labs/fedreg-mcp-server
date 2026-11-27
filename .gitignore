@@ -2,7 +2,9 @@ node_modules/
 dist/
 *.log
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
 coverage/
 .vitest-cache/
 *.tsbuildinfo

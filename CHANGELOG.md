@@ -77,67 +77,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 - return structured results and mark failed runs as errors (tools)
-
-### Added
-- let a server without accounts hide sign-in (kit)
-- let product.mjs override page labels (site)
-- return structured results and mark failed runs as errors (tools)
-- serve the documentation site at /docs (accounts)
-- move the portal onto the shared kit with a landing page and WCAG 2.2 AA fixes (web)
-
-### Fixed
-- name the code blocks Expressive Code makes scrollable (site)
-- on a read error drop only the file's headers (docs)
-- report docs-site read errors without the file's headers (docs)
-- keep queueMicrotask in the Deno worker (sandbox)
-- cap the request body in the Node adapter too (http)
-- prerender the policy pages so they read without JavaScript (web)
-- tie only key problems to the key field (portal)
-- accept hosted connectors' Origin on the signed-in MCP endpoint (accounts)
-- complete the third-party notices and describe regulations.gov pacing accurately
-- keep platform health checks working, and require the public origin with auth (http)
-- name the account key card after the key it holds (web)
-- say when regulations.gov works without an account (web)
-- serve portal error and not-found pages, and validate MCP Origin in the CORS middleware (accounts)
-
-### Changed
-- declare the service settings in .railway/railway.ts (railway)
-- expect no-store on a docs read error (docs)
-- declare the page-label overrides (none) in product.mjs (site)
-- tolerate EPIPE as well as ECONNRESET after an early 413 (http)
-- strip tags until none are left when reading policy text
-- fail the browser journey in CI instead of skipping it (web)
-- keep six core rules from the Biome setup (lint)
-- describe Origin handling as implemented
-- serve the docs site through the real /docs handler in browser tests (web)
-- always start the preview servers fresh (web)
-- note why the signed-in MCP endpoint accepts any Origin
-- v3 migration note, and accurate shared-key and rate-limit wording
-- describe structured results and the portal's third-party notices in CLAUDE.md
-- restructure the README and community files like the reference
-- ship the portal's third-party license texts (web)
-- drop the unused nock devDependency (deps)
-- release when the portal's bundled dependencies change (release)
-- audit and build the documentation site
-- check the documentation site with axe and build it for test:web (web)
-- build the documentation site into the image (docker)
-- add the documentation site (site)
-- accessibility conformance and portal notes
-- run the browser accessibility suite on every pull request
-- browser accessibility suite and signed-in journey with Playwright and axe (web)
-- update CLAUDE.md for the new toolchain, CI and release flow
-- gate releases on CI, cut and publish in separate jobs (release)
-- install the bundle from the frozen lockfile and smoke it (mcpb)
-- gate on audit, Node 24/26, required runners, package and Docker jobs
-- audit the lockfile daily and police audit exceptions (security)
-- run on node 26 with prebuilt isolated-vm and pinned Deno (docker)
-- lint with typescript-eslint and fix every finding (lint)
-- move to pnpm 12, Node 24/26 and TypeScript 6 with current dependencies
-
-## [4.0.0] - 2026-11-21
-
-### Breaking
-- return structured results and mark failed runs as errors (tools)
 - fail closed on HTTP auth and run hosted code only in Deno (auth)
 
 ### Added
@@ -155,7 +94,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - cap the request body in the Node adapter too (http)
 - prerender the policy pages so they read without JavaScript (web)
 - tie only key problems to the key field (portal)
-- accept hosted connectors' Origin on the signed-in MCP endpoint (accounts)
 - accept hosted connectors' Origin on the signed-in MCP endpoint (accounts)
 - complete the third-party notices and describe regulations.gov pacing accurately
 - keep platform health checks working, and require the public origin with auth (http)
@@ -444,7 +382,6 @@ Initial public release.
 [4.1.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.2...v4.1.0
 [4.0.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.1...v4.0.2
 [4.0.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.1
-[4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.0...v4.0.0
 [4.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v3.0.0...v4.0.0
 [3.0.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.4...v3.0.0
 [2.2.4]: https://github.com/blen-labs/fedreg-mcp-server/compare/v2.2.3...v2.2.4

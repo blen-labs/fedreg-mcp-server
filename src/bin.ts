@@ -21,13 +21,53 @@ interface CliArgs {
   portExplicit: boolean;
 }
 
+const SANDBOXES: readonly string[] = ['auto', 'isolate', 'deno'];
+
+/** True for an MCPB host's unexpanded '${user_config.x}', which it passes literally for a field left empty. */
+function isPlaceholder(value: string): boolean {
+  return /^\$\{[^}]*\}$/.test(value.trim());
+}
+
+/** A setting that must hold a real value: unset (undefined) is fine, a blank or unexpanded placeholder is not. */
+function setting(name: string, value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (!value.trim()) throw new Error(`${name} is blank. Unset it or give it a value.`);
+  if (isPlaceholder(value)) throw new Error(`${name} is the unexpanded placeholder '${value.trim()}'. Give it a value or unset it.`);
+  return value.trim();
+}
+
+/** A finite, non-negative number from a setting, or `fallback` when unset. Blank, non-numeric or negative is an error, never 0 or NaN. */
+function numeric(name: string, value: string | undefined, fallback: number): number {
+  const v = setting(name, value);
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`${name} must be a number, got '${v}'.`);
+  if (n < 0) throw new Error(`${name} must not be negative, got '${v}'.`);
+  return n;
+}
+
+function parsePort(name: string, value: string | undefined): number {
+  const n = numeric(name, value, 8080);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) throw new Error(`${name} must be a whole number from 0 to 65535, got '${value}'.`);
+  return n;
+}
+
+/** The value after an option, or an error when the command line ends first. */
+function optionValue(argv: string[], i: number): string {
+  const v = argv[i + 1];
+  if (v === undefined || v.startsWith('--')) throw new Error(`Option '${argv[i]}' needs a value. Run with --help to see the options.`);
+  return v;
+}
+
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     http: false,
-    port: Number(process.env.PORT ?? 8080),
-    host: process.env.HOST ?? '0.0.0.0',
-    hostExplicit: Boolean(process.env.HOST),
-    sandbox: (process.env.FEDREG_SANDBOX as SandboxKind | undefined) ?? 'auto',
+    // PORT is read after the loop, and only when --port did not override it.
+    port: 8080,
+    // A blank HOST or FEDREG_SANDBOX is the same as none; an unexpanded placeholder is a mistake.
+    host: process.env.HOST?.trim() ? setting('HOST', process.env.HOST)! : '0.0.0.0',
+    hostExplicit: Boolean(process.env.HOST?.trim()),
+    sandbox: (process.env.FEDREG_SANDBOX?.trim() ? setting('FEDREG_SANDBOX', process.env.FEDREG_SANDBOX) : 'auto') as SandboxKind,
     insecure: false,
     rotateKeys: false,
     portExplicit: false,
@@ -37,14 +77,20 @@ function parseArgs(argv: string[]): CliArgs {
     if (a === '--http') args.http = true;
     else if (a === '--insecure') args.insecure = true;
     else if (a === '--rotate-keys') args.rotateKeys = true;
-    else if (a === '--port') { args.port = Number(argv[++i]); args.portExplicit = true; }
-    else if (a === '--host') { args.host = String(argv[++i]); args.hostExplicit = true; }
-    else if (a === '--sandbox') args.sandbox = argv[++i] as SandboxKind;
+    else if (a === '--port') { args.port = parsePort('--port', optionValue(argv, i++)); args.portExplicit = true; }
+    else if (a === '--host') { args.host = setting('--host', optionValue(argv, i++))!; args.hostExplicit = true; }
+    else if (a === '--sandbox') args.sandbox = setting('--sandbox', optionValue(argv, i++)) as SandboxKind;
     else if (a === '--help' || a === '-h') {
       printHelp();
       process.exit(0);
     }
+    // The separator some runners pass through (`pnpm dev -- --http`).
+    else if (a === '--') continue;
+    // A mistyped --http must not quietly start the stdio transport instead.
+    else throw new Error(`Unknown option '${a}'. Run with --help to see the options.`);
   }
+  if (!args.portExplicit) args.port = parsePort('PORT', process.env.PORT);
+  if (!SANDBOXES.includes(args.sandbox)) throw new Error(`Unknown sandbox '${args.sandbox}'. Use auto, isolate or deno.`);
   // An unauthenticated server runs anyone's code: keep it on this machine unless told otherwise.
   if (args.insecure && !args.hostExplicit) args.host = '127.0.0.1';
   return args;
@@ -62,6 +108,15 @@ function printHelp(): void {
   --rotate-keys          Account mode: re-encrypt stored keys under ENCRYPTION_ACTIVE_KEY_ID, then exit
   -h, --help             Show this help
 `);
+}
+
+/**
+ * A secret from the environment, or undefined when unset, blank, or an unexpanded host placeholder
+ * (the MCPB manifest passes '${user_config.regs_api_key}' literally when the optional field is empty).
+ */
+function secret(value: string | undefined): string | undefined {
+  const v = value?.trim();
+  return v && !isPlaceholder(v) ? v : undefined;
 }
 
 /** A positive number (and at least `min`) from the environment, or `fallback` when unset or invalid. */
@@ -113,12 +168,12 @@ async function main(): Promise<void> {
     regsBaseUrl: process.env.FEDREG_REGS_BASE_URL ?? 'https://api.regulations.gov',
     // In account mode the shared key serves only the anonymous /mcp endpoint; signed-in users at
     // /mcp/account always use their own key (accountDependencies strips this one).
-    regsApiKey: process.env.FEDREG_REGS_API_KEY,
+    regsApiKey: secret(process.env.FEDREG_REGS_API_KEY),
     userAgent: process.env.FEDREG_USER_AGENT ?? 'fedreg-mcp-server/2.0 (+https://github.com/blen-labs/fedreg-mcp-server)',
-    upstreamTimeoutMs: Number(process.env.FEDREG_UPSTREAM_TIMEOUT_MS ?? 20_000),
-    upstreamRetries: Number(process.env.FEDREG_UPSTREAM_RETRIES ?? 3),
-    cacheTtlMs: Number(process.env.FEDREG_CACHE_TTL_MS ?? 300_000),
-    cacheMaxItems: Number(process.env.FEDREG_CACHE_MAX_ITEMS ?? 2000),
+    upstreamTimeoutMs: numeric('FEDREG_UPSTREAM_TIMEOUT_MS', process.env.FEDREG_UPSTREAM_TIMEOUT_MS, 20_000),
+    upstreamRetries: numeric('FEDREG_UPSTREAM_RETRIES', process.env.FEDREG_UPSTREAM_RETRIES, 3),
+    cacheTtlMs: numeric('FEDREG_CACHE_TTL_MS', process.env.FEDREG_CACHE_TTL_MS, 300_000),
+    cacheMaxItems: numeric('FEDREG_CACHE_MAX_ITEMS', process.env.FEDREG_CACHE_MAX_ITEMS, 2000),
     sandbox: args.sandbox,
     // Authenticated HTTP serves many callers from one process: user code runs only in Deno.
     processIsolation: args.http && !args.insecure,
@@ -130,10 +185,7 @@ async function main(): Promise<void> {
     upstreamRatePerSec: atLeastOne(process.env.FEDREG_UPSTREAM_RATE_PER_SEC, UPSTREAM_DEFAULTS.ratePerSec),
     upstreamMaxWaitMs: atLeastOne(process.env.FEDREG_UPSTREAM_MAX_WAIT_MS, UPSTREAM_DEFAULTS.maxWaitMs),
     publicMaxCallsPerExecute: atLeastOne(process.env.FEDREG_PUBLIC_MAX_CALLS_PER_EXECUTE, PUBLIC_MAX_CALLS_PER_EXECUTE),
-    regsMaxCallsPerExecute: (() => {
-      const n = Number(process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE ?? 30);
-      return Number.isFinite(n) && n >= 0 ? n : 30;
-    })(),
+    regsMaxCallsPerExecute: numeric('FEDREG_REGS_MAX_CALLS_PER_EXECUTE', process.env.FEDREG_REGS_MAX_CALLS_PER_EXECUTE, 30),
     // Require >= 1: a rate of 0 would silently block ALL regs calls (it is NOT
     // "unlimited"). To disable regs, leave FEDREG_REGS_API_KEY unset instead.
     regsRatePerHour: atLeastOne(process.env.FEDREG_REGS_RATE_PER_HOUR, 1000),
@@ -170,7 +222,7 @@ async function main(): Promise<void> {
         log.warn('config.invalid_client_ip_header', { header: name });
         return undefined;
       })(),
-      subjectDailyQuota: Number(process.env.FEDREG_SUBJECT_DAILY_QUOTA ?? 10_000),
+      subjectDailyQuota: numeric('FEDREG_SUBJECT_DAILY_QUOTA', process.env.FEDREG_SUBJECT_DAILY_QUOTA, 10_000),
       insecure: args.insecure,
       allowedHosts,
       allowedOrigins,

@@ -262,7 +262,7 @@ The knobs below are every environment variable the server reads at startup (defa
 | `FEDREG_SUBJECT_DAILY_QUOTA` | `10000` | Requests per authenticated subject per UTC day. |
 | `RAILWAY_GIT_COMMIT_SHA` | set by Railway | The commit Railway built (GitHub-sourced deployments); `/health` reports it as `commit`, or `null` when unset or not a full SHA. Do not set it yourself. |
 
-CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--rotate-keys` (account mode: re-encrypt stored keys, see [docs/accounts.md](docs/accounts.md#encryption-rotation)), `--help`.
+CLI options: `--http`, `--port`, `--host`, `--sandbox auto|isolate|deno`, `--insecure`, `--rotate-keys` (account mode: re-encrypt stored keys, see [docs/accounts.md](docs/accounts.md#encryption-rotation)), `--help`. An unknown option, a bad `--sandbox`, `--port` or `--host` value, a blank or non-numeric numeric setting, or an unexpanded `${user_config...}` placeholder stops the server with a message and exit code 1 (`FEDREG_REGS_API_KEY` is the exception: blank or a placeholder means no key).
 
 ## Security
 
