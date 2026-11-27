@@ -70,7 +70,7 @@ server skips bearer-token verification entirely.
 # 1) Resource metadata (RFC 9728)
 curl -s "$URL/.well-known/oauth-protected-resource/mcp" | jq
 
-# 2) Health
+# 2) Health. Expect the "version" and "commit" that are running (see "Which release is running" below).
 curl -s "$URL/health" | jq
 
 # 3) List tools (unauthed gets 401 with WWW-Authenticate).
@@ -87,6 +87,22 @@ curl -i -X POST "$URL/mcp" \
 Every request is self-contained, so this same shape works against any replica.
 `Mcp-Method` (and `Mcp-Name` on `tools/call`) are required and must agree with
 the body — a mismatch is rejected with `-32020`.
+
+### Which release is running
+
+`GET /health` answers `{"ok":true,"sandbox":"deno","protocolVersion":"2026-07-28","version":"<version>","commit":"<full SHA>"}`
+(account mode answers `"status": "ok"` in place of `"ok": true`). `version` is the package
+version of the running build. `commit` is the full git SHA Railway built, which it injects as
+`RAILWAY_GIT_COMMIT_SHA` for deployments from GitHub; the server reads it once at startup, so a request
+cannot change it, and it needs nothing in the image. It is `null` when there is no such variable: a local
+run, `docker run`, the npm package and the Claude Desktop bundle report their version and `"commit": null`.
+A deployment made with `railway up` also has no SHA.
+
+Railway deploys every push to `main`, so a release shows up as two deployments: first the merged change
+(the old `version`, with that commit's SHA), then the release workflow's `chore(release)` commit that bumps
+the version (the new `version`, with the release commit's SHA, the one the `v<version>` tag points to).
+After a release, wait for `version` to read the new release; `commit` should equal
+`git rev-parse v<version>^{commit}`.
 
 ## 6. Pointing Claude at it
 
