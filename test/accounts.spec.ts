@@ -940,8 +940,16 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     }
     // A repeated redirect_uri is checked in full, not just its first value (Better Auth reads the last).
     const mixed = `${query(client.redirect_uris[0])}&redirect_uri=${encodeURIComponent('http://evil.example/cb')}`;
-    expect((await authPost('authorize', mixed)).status).toBe(400);
-    expect((await fetch(`${config.origin}/api/auth/oauth2/authorize?${mixed}`, { redirect: 'manual' })).status).toBe(400);
+    // The refusal must be this guard's (an unknown client_id would also fail later, with another error).
+    const refused = async (r: Response) => { expect(r.status).toBe(400); expect(await r.json()).toMatchObject({ error: 'invalid_request', error_description: expect.stringContaining('Redirect URIs must use HTTPS') }); };
+    await refused(await authPost('authorize', mixed));
+    await refused(await fetch(`${config.origin}/api/auth/oauth2/authorize?${mixed}`, { redirect: 'manual' }));
+    // A form body is split on `&` even when it is also valid JSON (the guard must not sniff the body).
+    await refused(await authPost('authorize', JSON.stringify({ redirect_uri: client.redirect_uris[0], x: '&redirect_uri=http://evil.example/cb' })));
+    // A JSON array of redirect URIs is checked element by element, not as one joined string.
+    await refused(await authPost('authorize', JSON.stringify({ ...Object.fromEntries(query(client.redirect_uris[0])), redirect_uri: [client.redirect_uris[0], 'http://evil.example/cb'] }), 'application/json'));
+    // A type Better Auth's body reader treats as JSON (a prefix match) is read as JSON here too.
+    await refused(await authPost('authorize', JSON.stringify({ ...Object.fromEntries(query(client.redirect_uris[0])), redirect_uri: 'http://evil.example/cb' }), 'application/json5'));
     // A JSON body that does not parse cannot slip past the check.
     expect((await authPost('authorize', '{"redirect_uri": ', 'application/json')).status).toBe(400);
     // The registered redirect, over a JSON POST, is not mistaken for a bad one.
