@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-11-27
+
+### Added
+- report the running version and commit (health)
+
+### Changed
+- list RAILWAY_GIT_COMMIT_SHA in the configuration table (health)
+- use a version placeholder in the example and correct the env-read note (health)
+
 ## [4.1.2] - 2026-11-26
 
 ### Fixed
@@ -422,7 +431,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.2...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.2.0...HEAD
+[4.2.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.2...v4.2.0
 [4.1.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.1...v4.1.2
 [4.1.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.0.2...v4.1.0
