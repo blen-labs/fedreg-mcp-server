@@ -233,3 +233,19 @@ async function superviseThenCloseStdin(code: string): Promise<boolean> {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+describe('sandbox selection', () => {
+  it('never runs user code in-process for multi-user HTTP serving', async () => {
+    const { pickSandbox } = await import('../src/sandbox/index.js');
+    await expect(pickSandbox('isolate', { processIsolation: true })).rejects.toThrow(/not allowed/);
+    const r = await pickSandbox('auto', { processIsolation: true });
+    expect(['deno', 'unavailable']).toContain(r.kind);
+    const prev = process.env.PATH;
+    process.env.PATH = '/nonexistent';
+    try {
+      const none = await pickSandbox('auto', { processIsolation: true });
+      expect(none.kind).toBe('unavailable');
+      expect((await none.execute({ code: 'return 1' }, { dispatch: async () => ({ ok: true }) })).error?.message).toMatch(/Deno/);
+    } finally { process.env.PATH = prev; }
+  });
+});
