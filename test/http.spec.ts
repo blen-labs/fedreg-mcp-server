@@ -176,6 +176,7 @@ describe('clientIp', () => {
   });
   it('uses only a literal address from the trusted header, and unwraps IPv4-mapped IPv6', () => {
     expect(clientIp(req('100.64.0.2', { 'x-real-ip': 'not-an-ip' }), 'x-real-ip')).toBe('100.64.0.2');
+    for (const zoned of ['fe80::1%eth0', `fe80::1%${'z'.repeat(200)}`]) expect(clientIp(req('100.64.0.2', { 'x-real-ip': zoned }), 'x-real-ip'), zoned).toBe('100.64.0.2');
     expect(clientIp(req('100.64.0.2', { 'x-real-ip': '::ffff:192.0.2.9' }), 'x-real-ip')).toBe('192.0.2.9');
     expect(clientIp(req('100.64.0.2', { 'x-real-ip': '::ffff:c000:209' }), 'x-real-ip')).toBe('192.0.2.9');
     expect(clientIp(req('100.64.0.2', { 'x-real-ip': '2001:db8::1' }), 'x-real-ip')).toBe('2001:db8::1');
