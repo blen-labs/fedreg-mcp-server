@@ -16,8 +16,8 @@ export interface BuildInfo {
 const COMMIT_ENV = 'RAILWAY_GIT_COMMIT_SHA';
 
 /**
- * Read once at startup from the environment `src/bin.ts` passes in (nothing else reads
- * `process.env`), never from a request. Anything that is not a full lowercase SHA-1 (an
+ * Read once at startup from the environment `src/bin.ts` passes in (callers never hand
+ * it `process.env` themselves, so tests can inject one), never from a request. Anything that is not a full lowercase SHA-1 (an
  * empty or malformed value) reports `null` rather than a guess.
  */
 export function readBuildInfo(env: NodeJS.ProcessEnv): BuildInfo {
