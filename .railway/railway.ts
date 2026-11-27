@@ -25,7 +25,7 @@ export default defineRailway(() => {
 
   return project('fedreg-mcp-server', {
     // Secrets stay set in Railway. Without this, IaC would manage every service variable.
-    // @ts-expect-error -- the railway 3.17.0 types lack project `variables`; the CLI reads it.
+    // @ts-expect-error -- the railway 3.18.0 types lack project `variables`; the CLI reads it.
     variables: { managed: false },
     resources: [fedregMcpServer],
   });
