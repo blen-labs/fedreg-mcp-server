@@ -72,19 +72,38 @@ function registeredRedirects(body: Buffer): unknown {
     return [];
   }
 }
-/** Values of a field in a POST body, whether form-encoded or JSON (either may reach Better Auth). */
-function jsonOrForm(body: Buffer): { getAll(name: string): string[] } {
-  const text = body.toString('utf8').trim();
-  if (text.startsWith('{')) {
+const FORM_MEDIA_TYPE = 'application/x-www-form-urlencoded';
+/**
+ * Every value of a field in a POST body, read the way Better Auth reads that media type: a JSON
+ * body as JSON, a form body with the runtime's own form parser (as `lockTarget` does). Never sniff
+ * the body: a form body that happens to be valid JSON must be split on `&` like Better Auth does.
+ * Any other media type is refused by Better Auth (authorize accepts only forms), so it has no
+ * values here. A body this cannot read yields a value no redirect check accepts.
+ */
+async function postedValues(contentType: string | undefined, body: Buffer, name: string): Promise<string[]> {
+  const media = (contentType ?? '').toLowerCase().split(';')[0]!.trim();
+  if (/^application\/([a-z0-9.+-]*\+)?json$/.test(media)) {
     try {
-      const fields = JSON.parse(text) as Record<string, unknown>;
-      return { getAll: name => { const v = fields[name]; return v === undefined || v === null ? [] : [String(v)]; } };
+      const o: unknown = JSON.parse(body.toString('utf8'));
+      if (!o || typeof o !== 'object' || Array.isArray(o)) return ['invalid'];
+      const v = (o as Record<string, unknown>)[name];
+      return v === undefined ? [] : (Array.isArray(v) ? (v as unknown[]) : [v]).map(String);
     } catch {
-      // Not parseable: a value no redirect check accepts, so the request is refused here.
-      return { getAll: () => ['invalid'] };
+      return ['invalid'];
     }
   }
-  return new URLSearchParams(text);
+  // Anything else is read as a form, whatever it claims to be, so the guard fails closed: Better Auth
+  // accepts only forms here, and if it ever read another type this check still saw the form values.
+  try {
+    const form = await new Request('http://localhost/', {
+      method: 'POST',
+      headers: { 'content-type': FORM_MEDIA_TYPE },
+      body: new Uint8Array(body),
+    }).formData();
+    return form.getAll(name).map((v) => (typeof v === 'string' ? v : 'invalid'));
+  } catch {
+    return ['invalid'];
+  }
 }
 /** Client-side routes of the portal (web/src/main.tsx), served as index.html. */
 const PORTAL_ROUTES = ['/', '/sign-in', '/connect', '/consent', '/account', '/error'];
@@ -496,17 +515,17 @@ export async function createAccountApp(
       let body = ['GET', 'HEAD'].includes(req.method) ? undefined : req.body;
       // MCP requires every redirect URI to be HTTPS or localhost. Check registrations here, and
       // authorization requests too, since Client ID Metadata Documents skip registration.
-      const redirects =
-        req.path === '/oauth2/register' && Buffer.isBuffer(body)
-          ? registeredRedirects(body)
-          : req.path === '/oauth2/authorize'
-            // Every value is checked: a repeated field is read by Better Auth as its last value,
-            // which the first one alone would not show.
-            ? (req.method === 'POST' && Buffer.isBuffer(body)
-                ? jsonOrForm(body)
-                : authUrl.searchParams
-              ).getAll('redirect_uri').filter(Boolean)
-            : [];
+      let redirects: unknown = [];
+      if (req.path === '/oauth2/register' && Buffer.isBuffer(body)) redirects = registeredRedirects(body);
+      else if (req.path === '/oauth2/authorize') {
+        // Every value is checked: a repeated field is read by Better Auth as its last value,
+        // which the first one alone would not show.
+        redirects = (
+          req.method === 'POST' && Buffer.isBuffer(body)
+            ? await postedValues(req.get('content-type'), body, 'redirect_uri')
+            : authUrl.searchParams.getAll('redirect_uri')
+        ).filter(Boolean);
+      }
       if (!Array.isArray(redirects) || !redirects.every(allowedRedirect))
         return res.status(400).json({
           error: req.path === '/oauth2/register' ? 'invalid_redirect_uri' : 'invalid_request',
