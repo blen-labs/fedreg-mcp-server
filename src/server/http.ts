@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { createMcpHandler, type AuthInfo, type McpRequestContext } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import { buildMcpServer, MCP_PROTOCOL_VERSION } from './mcpServer.js';
+import { readBuildInfo, type BuildInfo } from './buildInfo.js';
 import type { CatalogDeps } from './toolCatalog.js';
 import { IpRateLimiter, clientIp } from './ipRateLimiter.js';
 import { SubjectQuota } from '../util/quotas.js';
@@ -39,6 +40,8 @@ export interface HttpOptions {
   allowedOrigins?: string[];
   /** Public origin clients should use (for protected-resource metadata). */
   publicOrigin?: string;
+  /** What `/health` reports as running; bin.ts reads it from the platform environment at startup. Omitted: this version with no commit. */
+  buildInfo?: BuildInfo;
 }
 
 export interface HttpHandle {
@@ -91,6 +94,7 @@ function subjectOf(ctx: McpRequestContext): string | undefined {
 const isLoopbackHost = (host: string) => ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host.toLowerCase());
 
 export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<HttpHandle> {
+  const buildInfo = opts.buildInfo ?? readBuildInfo({});
   const verifier = buildVerifier(opts.auth);
   if (!verifier && !opts.insecure) {
     throw new AuthConfigError('--http needs authentication: set FEDREG_AUTH_PROVIDER (generic-oidc, clerk, workos, auth0) with FEDREG_AUTH_ISSUER, FEDREG_AUTH_AUDIENCE and FEDREG_AUTH_JWKS_URL, use FEDREG_AUTH_PROVIDER=accounts, or pass --insecure for an unauthenticated local server.');
@@ -159,7 +163,7 @@ export async function startHttp(deps: CatalogDeps, opts: HttpOptions): Promise<H
       }
 
       if (url.pathname === '/health' && req.method === 'GET') {
-        return reply(res, 200, { ok: true, sandbox: deps.sandbox.kind, protocolVersion: MCP_PROTOCOL_VERSION });
+        return reply(res, 200, { ok: true, sandbox: deps.sandbox.kind, protocolVersion: MCP_PROTOCOL_VERSION, ...buildInfo });
       }
 
       if (url.pathname === MCP_PATH) {

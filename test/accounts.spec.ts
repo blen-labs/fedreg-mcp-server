@@ -13,6 +13,8 @@ import fetchCookie from 'fetch-cookie';
 import { CookieJar } from 'tough-cookie';
 import { MockAgent } from 'undici';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { readBuildInfo } from '../src/server/buildInfo.js';
+import { SERVER_VERSION } from '../src/server/mcpServer.js';
 import { Keyring, randomToken, digest } from '../src/accounts/crypto.js';
 import { AccessTokenFormat } from '../src/accounts/token-admission.js';
 import { Store, personalOwner } from '../src/accounts/store.js';
@@ -281,6 +283,18 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     const google = await send(fetch, '/api/auth/sign-in/social', { provider: 'google', callbackURL: '/account' });
     expect(google.status, await google.clone().text()).toBe(200);
     expect(new URL((await google.json() as any).url).hostname).toBe('accounts.google.com');
+  });
+  it('serves /health with the running version and commit, and checks the database', async () => {
+    expect(await (await fetch(`${config.origin}/health`)).json()).toEqual({
+      status: 'ok', protocolVersion: '2026-07-28', sandbox: 'deno', version: SERVER_VERSION, commit: null,
+    });
+    // The commit is the platform's, read when the app starts; a replica started with one reports it,
+    // and a header on the request cannot change it.
+    const sha = 'c'.repeat(40);
+    await onReplica(await build({}, { buildInfo: readBuildInfo({ RAILWAY_GIT_COMMIT_SHA: sha }) }), async () => {
+      const j = await (await fetch(`${config.origin}/health`, { headers: { 'x-railway-git-commit-sha': 'd'.repeat(40) } })).json();
+      expect(j).toMatchObject({ status: 'ok', version: SERVER_VERSION, commit: sha });
+    });
   });
   it('serves the documentation site at /docs with its own CSP, behind the Host check', async () => {
     const moved = await fetch(`${config.origin}/docs?q=1`, { redirect: 'manual' });
