@@ -948,6 +948,8 @@ describe.skipIf(!database)('account HTTP / OAuth with PostgreSQL', () => {
     await refused(await authPost('authorize', JSON.stringify({ redirect_uri: client.redirect_uris[0], x: '&redirect_uri=http://evil.example/cb' })));
     // A JSON array of redirect URIs is checked element by element, not as one joined string.
     await refused(await authPost('authorize', JSON.stringify({ ...Object.fromEntries(query(client.redirect_uris[0])), redirect_uri: [client.redirect_uris[0], 'http://evil.example/cb'] }), 'application/json'));
+    // A type Better Auth's body reader treats as JSON (a prefix match) is read as JSON here too.
+    await refused(await authPost('authorize', JSON.stringify({ ...Object.fromEntries(query(client.redirect_uris[0])), redirect_uri: 'http://evil.example/cb' }), 'application/json5'));
     // A JSON body that does not parse cannot slip past the check.
     expect((await authPost('authorize', '{"redirect_uri": ', 'application/json')).status).toBe(400);
     // The registered redirect, over a JSON POST, is not mistaken for a bad one.

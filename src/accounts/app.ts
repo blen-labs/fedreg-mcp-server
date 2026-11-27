@@ -72,17 +72,18 @@ function registeredRedirects(body: Buffer): unknown {
     return [];
   }
 }
-const FORM_MEDIA_TYPE = 'application/x-www-form-urlencoded';
 /**
  * Every value of a field in a POST body, read the way Better Auth reads that media type: a JSON
- * body as JSON, a form body with the runtime's own form parser (as `lockTarget` does). Never sniff
+ * body as JSON, a form body with the runtime's own form parser (as `tokenLockId` does). Never sniff
  * the body: a form body that happens to be valid JSON must be split on `&` like Better Auth does.
- * Any other media type is refused by Better Auth (authorize accepts only forms), so it has no
- * values here. A body this cannot read yields a value no redirect check accepts.
+ * Any other media type is read as a form here (Better Auth's authorize accepts only forms and
+ * answers 415 otherwise), so the guard still fails closed. A body this cannot read yields a value
+ * no redirect check accepts.
  */
 async function postedValues(contentType: string | undefined, body: Buffer, name: string): Promise<string[]> {
-  const media = (contentType ?? '').toLowerCase().split(';')[0]!.trim();
-  if (/^application\/([a-z0-9.+-]*\+)?json$/.test(media)) {
+  // Same test as better-call's body reader (a prefix match on the whole header), so a type it
+  // would read as JSON (application/json5, application/json; charset=...) is never read as a form here.
+  if (/^application\/([a-z0-9.+-]*\+)?json/.test((contentType ?? '').toLowerCase().trim())) {
     try {
       const o: unknown = JSON.parse(body.toString('utf8'));
       if (!o || typeof o !== 'object' || Array.isArray(o)) return ['invalid'];
@@ -97,7 +98,7 @@ async function postedValues(contentType: string | undefined, body: Buffer, name:
   try {
     const form = await new Request('http://localhost/', {
       method: 'POST',
-      headers: { 'content-type': FORM_MEDIA_TYPE },
+      headers: { 'content-type': FORM },
       body: new Uint8Array(body),
     }).formData();
     return form.getAll(name).map((v) => (typeof v === 'string' ? v : 'invalid'));
