@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { startStdio } from './server/stdio.js';
 import { startHttp, type HttpHandle } from './server/http.js';
+import { readBuildInfo } from './server/buildInfo.js';
 import { buildSupervisor, EXECUTION_DEFAULTS, UPSTREAM_DEFAULTS, type SupervisorConfig } from './supervisor/index.js';
 import { PUBLIC_MAX_CALLS_PER_EXECUTE } from './tools/execute.js';
 import type { SandboxKind } from './sandbox/types.js';
@@ -146,7 +147,7 @@ async function main(): Promise<void> {
   if (accounts) {
     const { loadAccountConfig } = await import('./accounts/config.js');
     const { startAccountHttp } = await import('./accounts/runtime.js');
-    handle = await startAccountHttp(deps, cfg, loadAccountConfig(process.env), args.port, args.host);
+    handle = await startAccountHttp(deps, cfg, loadAccountConfig(process.env), args.port, args.host, readBuildInfo(process.env));
   } else if (args.http) {
     const allowedOrigins = process.env.FEDREG_ALLOWED_ORIGINS
       ? process.env.FEDREG_ALLOWED_ORIGINS.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
@@ -174,6 +175,7 @@ async function main(): Promise<void> {
       allowedHosts,
       allowedOrigins,
       publicOrigin: process.env.FEDREG_PUBLIC_ORIGIN,
+      buildInfo: readBuildInfo(process.env),
       auth: {
         provider: (process.env.FEDREG_AUTH_PROVIDER?.trim() as AuthConfigProvider) || 'none',
         issuer: process.env.FEDREG_AUTH_ISSUER,

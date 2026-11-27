@@ -5,6 +5,8 @@ import type { Server } from 'node:http';
 import type { Tool } from '@modelcontextprotocol/server';
 import { expectToolMetadata } from './tool-metadata.js';
 import { startHttp, type HttpHandle } from '../src/server/http.js';
+import { readBuildInfo } from '../src/server/buildInfo.js';
+import { SERVER_VERSION } from '../src/server/mcpServer.js';
 import { buildSdk } from '../src/sdk/bindings.js';
 import { getSources } from '../src/sdk/sources/index.js';
 import { buildCorpus } from '../src/search/corpus.js';
@@ -182,6 +184,20 @@ describe('Streamable HTTP transport', () => {
     // Guards against reintroducing the SDK's LATEST_PROTOCOL_VERSION here, which is
     // the legacy-era constant ('2025-11-25'), not the revision this server speaks.
     expect(j.protocolVersion).toBe(PROTOCOL_VERSION);
+  });
+
+  it('serves /health reporting the running version and commit (insecure mode)', async () => {
+    // No platform SHA in a local run: commit is null, the version is the package's.
+    expect(await (await fetch(`${base}/health`)).json()).toEqual({
+      ok: true, sandbox: deps.sandbox.kind, protocolVersion: PROTOCOL_VERSION, version: SERVER_VERSION, commit: null,
+    });
+    // The commit comes from the platform environment read at startup (readBuildInfo), never from the request.
+    const sha = 'a'.repeat(40);
+    const stamped = await startHttp(deps, { host: '127.0.0.1', port: 0, rps: 1000, burst: 1000, subjectDailyQuota: 1_000_000, insecure: true, auth: { provider: 'none' }, publicOrigin: 'http://127.0.0.1', buildInfo: readBuildInfo({ RAILWAY_GIT_COMMIT_SHA: sha }) });
+    try {
+      const j = await (await fetch(`http://127.0.0.1:${stamped.port}/health`, { headers: { 'x-railway-git-commit-sha': 'b'.repeat(40) } })).json() as { commit: string };
+      expect(j.commit).toBe(sha);
+    } finally { await stamped.close(); }
   });
 
   it('lists tools from a single stateless request and mints no session', async () => {
@@ -393,6 +409,11 @@ describe('Auth enforcement (OIDC, signed tokens from a local issuer)', () => {
       auth: { provider: 'generic-oidc', issuer: ISSUER, audience: AUDIENCE, jwksUrl, scopes: ['fedreg:read'] },
     });
     secBase = `http://127.0.0.1:${secured.port}`;
+  });
+
+  it('serves /health with the version and commit without a token (OIDC mode)', async () => {
+    const j = await (await fetch(`${secBase}/health`)).json() as Record<string, unknown>;
+    expect(j).toMatchObject({ ok: true, version: SERVER_VERSION, commit: null });
   });
 
   afterAll(async () => {

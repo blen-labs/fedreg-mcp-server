@@ -12,6 +12,7 @@ import { ACCOUNT_MCP_PATH, PUBLIC_MCP_PATH } from './paths.js';
 import { digest } from './crypto.js';
 import { Store, personalOwner } from './store.js';
 import type { AccountConfig } from './config.js';
+import type { BuildInfo } from '../server/buildInfo.js';
 
 /** Account-scoped regs clients, reused across executes so their response caches survive. */
 const ACCOUNT_CLIENT_MAX = 500;
@@ -112,7 +113,7 @@ export function publicDependencies(deps: CatalogDeps, origin: string): CatalogDe
   return { ...deps, sdk: { ...deps.sdk, meta: deps.sdk.meta.map(m => m.name === 'regs' ? { ...m, enabled: false, disabledReason } : m) } };
 }
 
-export async function startAccountHttp(deps: CatalogDeps, cfg: SupervisorConfig, config: AccountConfig, port: number, host: string): Promise<HttpHandle> {
+export async function startAccountHttp(deps: CatalogDeps, cfg: SupervisorConfig, config: AccountConfig, port: number, host: string, buildInfo?: BuildInfo): Promise<HttpHandle> {
   const pool = new Pool({ connectionString: config.databaseUrl, max: 10 });
   pool.on('error', () => log.error('account.database_error'));
   const store = new Store(pool, config.keyring);
@@ -121,7 +122,7 @@ export async function startAccountHttp(deps: CatalogDeps, cfg: SupervisorConfig,
     await store.initialize();
     // Before this endpoint split, account mode ignored the shared key; make its new use visible.
     if (deps.sdk.methods.regs) log.info('account.public_regs_shared_key', { path: PUBLIC_MCP_PATH });
-    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store), fetch, publicDependencies(deps, config.origin));
+    service = await createAccountApp(config, store, accountDependencies(deps, cfg, store), fetch, publicDependencies(deps, config.origin), { buildInfo });
     const server = createServer(service.app);
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
     const cleanup = setInterval(() => { void store.cleanup().catch(() => log.error('account.cleanup_failed')); }, 60_000);

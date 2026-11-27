@@ -207,7 +207,8 @@ or shared session store.
 - `GET /.well-known/oauth-protected-resource/mcp` — RFC 9728 metadata
   document (`resource`, `authorization_servers`, `bearer_methods_supported`,
   `scopes_supported`).
-- `GET /health` — liveness probe (used by Docker `HEALTHCHECK` and Railway).
+- `GET /health` — liveness probe (used by Docker `HEALTHCHECK` and Railway). It also reports the running
+  `version` and `commit` (Railway's `RAILWAY_GIT_COMMIT_SHA`, `null` when unset; `src/server/buildInfo.ts`).
 - `POST /mcp` — the MCP endpoint. Each POST is one complete JSON-RPC request.
   `MCP-Protocol-Version` and `Mcp-Method` are required, plus `Mcp-Name` for
   `tools/call`; a header that disagrees with the body is rejected with

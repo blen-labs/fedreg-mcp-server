@@ -14,6 +14,9 @@ import { log } from '../util/logger.js';
  */
 export const MCP_PROTOCOL_VERSION = '2026-07-28';
 
+/** The package version that is running; `scripts/release.mjs` rewrites it at each release. */
+export const SERVER_VERSION = '4.1.2'; // x-release-version
+
 // The catalog is derived from process configuration (which sources are bound), not from
 // the caller, so every tenant sees byte-identical results and a shared cache is safe.
 const LIST_CACHE_HINT = { ttlMs: 300_000, cacheScope: 'public' as const };
@@ -50,7 +53,7 @@ export const MAX_TOOL_INPUT_ELEMENTS = 16;
 
 export function buildMcpServer(deps: CatalogDeps, requestCtx?: RequestCtx): McpServer {
   const server = new McpServer(
-    { name: 'fedreg-mcp-server', version: '4.1.2' }, // x-release-version
+    { name: 'fedreg-mcp-server', version: SERVER_VERSION },
     {
       capabilities: { tools: {} },
       maxToolInputElements: MAX_TOOL_INPUT_ELEMENTS,
