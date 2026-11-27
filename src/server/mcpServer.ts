@@ -15,7 +15,7 @@ import { log } from '../util/logger.js';
 export const MCP_PROTOCOL_VERSION = '2026-07-28';
 
 /** The package version that is running; `scripts/release.mjs` rewrites it at each release. */
-export const SERVER_VERSION = '4.2.1'; // x-release-version
+export const SERVER_VERSION = '4.2.2'; // x-release-version
 
 // The catalog is derived from process configuration (which sources are bound), not from
 // the caller, so every tenant sees byte-identical results and a shared cache is safe.

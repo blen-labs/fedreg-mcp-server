@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [4.2.2] - 2026-11-27
+
+### Fixed
+- let --port override PORT, refuse negative settings and a flag as an option value (cli)
+- refuse unknown options, bad values and unexpanded placeholders (cli)
+
+### Changed
+- bump railway to 3.18.0 (deps-dev)
+- ignore .env.* and *.pem
+- merge the duplicate 4.0.0 entries (changelog)
+
 ## [4.2.1] - 2026-11-27
 
 ### Fixed
@@ -374,7 +385,8 @@ Initial public release.
   → notifications/initialized → tools/list → tools/call → sandbox → SDK
   → mocked upstream).
 
-[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.2.1...HEAD
+[Unreleased]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.2.2...HEAD
+[4.2.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.2.1...v4.2.2
 [4.2.1]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.2.0...v4.2.1
 [4.2.0]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.2...v4.2.0
 [4.1.2]: https://github.com/blen-labs/fedreg-mcp-server/compare/v4.1.1...v4.1.2
